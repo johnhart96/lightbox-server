@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: ./services/web
+    container_name: lightbox-web
+    user: "root"
+    ports:
+      - "8080:80"
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+
+  bind9:
+    image: ubuntu/bind9:latest
+    container_name: lightbox-bind9
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+    volumes:
+      - ./data/bind/named.conf.options:/etc/bind/named.conf.options
+      - ./data/bind/named.conf.local:/etc/bind/named.conf.local
+      - ./data/bind/zones:/etc/bind/zones
+      - ./data/bind/cache:/var/cache/bind
+    restart: unless-stopped
+    depends_on:
+      - web
+
+  dhcp:
+    build:
+      context: ./services/dhcp
+    container_name: lightbox-dhcp
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./data/dnsmasq:/etc/dnsmasq.d
+    restart: unless-stopped
+    depends_on:
+      - web
+
+  ntp:
+    build:
+      context: ./services/ntp
+    container_name: lightbox-ntp
+    network_mode: host
+    cap_add:
+      - SYS_TIME
+    volumes:
+      - ./data/chrony:/etc/chrony
+    restart: unless-stopped
+    depends_on:
+      - web
+
+  samba:
+    build:
+      context: ./services/samba
+    container_name: lightbox-samba
+    network_mode: host
+    volumes:
+      - ./data/samba:/etc/samba
+      - ./data/shares:/shares
+    restart: unless-stopped
+    depends_on:
+      - web

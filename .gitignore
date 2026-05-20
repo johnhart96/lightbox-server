@@ -1,0 +1,7 @@
+# Ignore user‑generated data directories
+# All data stored under the top‑level 'data' folder is runtime data and should not be version‑controlled.
+/data/
+
+# Optional: ignore any local SQLite database files if they are placed elsewhere
+.sqlite
+*.db

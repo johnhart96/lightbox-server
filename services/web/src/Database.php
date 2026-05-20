@@ -1,0 +1,162 @@
+<?php
+
+namespace App;
+
+use PDO;
+use PDOException;
+
+class Database {
+    private static $instance = null;
+    private $pdo;
+    private $dbPath = '/var/www/html/data/db/lightbox.db';
+
+    private function __construct() {
+        // Ensure the directory exists
+        if (!file_exists('/var/www/html/data/db')) {
+            mkdir('/var/www/html/data/db', 0777, true);
+        }
+
+        try {
+            $this->pdo = new PDO("sqlite:" . $this->dbPath);
+            $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+            $this->initializeSchema();
+        } catch (PDOException $e) {
+            die("Database connection failed: " . $e->getMessage());
+        }
+    }
+
+    public static function getInstance() {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+
+    public function getConnection() {
+        return $this->pdo;
+    }
+
+    private function initializeSchema() {
+        // 1. Settings table
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )");
+
+        // 2. DNS records table
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS dns_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hostname TEXT NOT NULL,
+            ip_address TEXT NOT NULL,
+            ip_type TEXT CHECK(ip_type IN ('A', 'AAAA')) NOT NULL,
+            description TEXT
+        )");
+
+        // 3. DHCP settings table (single row)
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS dhcp_settings (
+            id INTEGER PRIMARY KEY,
+            v4_enabled INTEGER DEFAULT 1,
+            v4_subnet TEXT DEFAULT '192.168.1.0',
+            v4_netmask TEXT DEFAULT '255.255.255.0',
+            v4_gateway TEXT DEFAULT '192.168.1.1',
+            v4_range_start TEXT DEFAULT '192.168.1.100',
+            v4_range_end TEXT DEFAULT '192.168.1.200',
+            v4_lease_time TEXT DEFAULT '12h',
+            v6_enabled INTEGER DEFAULT 0,
+            v6_prefix TEXT DEFAULT 'fd00::/64',
+            v6_range_start TEXT DEFAULT 'fd00::100',
+            v6_range_end TEXT DEFAULT 'fd00::200',
+            v6_lease_time TEXT DEFAULT '12h'
+        )");
+
+        // 4. DHCP reservations
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS dhcp_reservations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hostname TEXT NOT NULL,
+            mac_address TEXT NOT NULL,
+            ip_address TEXT NOT NULL,
+            ip_type TEXT CHECK(ip_type IN ('IPv4', 'IPv6')) NOT NULL
+        )");
+
+        // 5. Samba shares
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS samba_shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            share_name TEXT NOT NULL UNIQUE,
+            share_path TEXT NOT NULL,
+            writable INTEGER DEFAULT 1,
+            guest_ok INTEGER DEFAULT 1,
+            description TEXT
+        )");
+
+        // Seed default settings if empty
+        $stmt = $this->pdo->query("SELECT COUNT(*) FROM settings");
+        if ($stmt->fetchColumn() == 0) {
+            $defaultSettings = [
+                'system_name' => 'Lightbox-Server',
+                'domain_name' => 'lighting.local',
+                'primary_dns' => '8.8.8.8',
+                'secondary_dns' => '1.1.1.1',
+                'ntp_servers' => '0.pool.ntp.org, 1.pool.ntp.org',
+                'dhcp_interface' => '' // Empty defaults to listening on all interfaces
+            ];
+            $insert = $this->pdo->prepare("INSERT INTO settings (key, value) VALUES (:key, :value)");
+            foreach ($defaultSettings as $key => $value) {
+                $insert->execute([':key' => $key, ':value' => $value]);
+            }
+        }
+
+        // Seed default DHCP settings if empty
+        $stmt = $this->pdo->query("SELECT COUNT(*) FROM dhcp_settings");
+        if ($stmt->fetchColumn() == 0) {
+            $this->pdo->exec("INSERT INTO dhcp_settings (id) VALUES (1)");
+        }
+
+        // Seed default Samba share if empty
+        $stmt = $this->pdo->query("SELECT COUNT(*) FROM samba_shares");
+        if ($stmt->fetchColumn() == 0) {
+            $this->pdo->exec("INSERT INTO samba_shares (share_name, share_path, writable, guest_ok, description) 
+                VALUES ('ShowFiles', '/shares/ShowFiles', 1, 1, 'Lightbox Shared Show Files')");
+        }
+    }
+
+    // Helper functions for common database tasks
+    public function getSettings() {
+        $stmt = $this->pdo->query("SELECT key, value FROM settings");
+        $results = $stmt->fetchAll();
+        $settings = [];
+        foreach ($results as $row) {
+            $settings[$row['key']] = $row['value'];
+        }
+        return $settings;
+    }
+
+    public function updateSetting($key, $value) {
+        $stmt = $this->pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (:key, :value)");
+        return $stmt->execute([':key' => $key, ':value' => $value]);
+    }
+
+    public function getDhcpSettings() {
+        $stmt = $this->pdo->query("SELECT * FROM dhcp_settings WHERE id = 1");
+        return $stmt->fetch();
+    }
+
+    public function updateDhcpSettings($data) {
+        $sql = "UPDATE dhcp_settings SET 
+            v4_enabled = :v4_enabled,
+            v4_subnet = :v4_subnet,
+            v4_netmask = :v4_netmask,
+            v4_gateway = :v4_gateway,
+            v4_range_start = :v4_range_start,
+            v4_range_end = :v4_range_end,
+            v4_lease_time = :v4_lease_time,
+            v6_enabled = :v6_enabled,
+            v6_prefix = :v6_prefix,
+            v6_range_start = :v6_range_start,
+            v6_range_end = :v6_range_end,
+            v6_lease_time = :v6_lease_time
+            WHERE id = 1";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute($data);
+    }
+}
