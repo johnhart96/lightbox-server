@@ -57,7 +57,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                     </li>
                     <li>
                         <a href="#samba" class="nav-link" data-tab="samba">
-                            <span class="icon">📁</span> Samba Shares
+                            <span class="icon">📁</span> File Shares
                         </a>
                     </li>
                     <li>
@@ -120,7 +120,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                             <div class="stat-icon green">📁</div>
                             <div class="stat-details">
                                 <span class="stat-val" id="stat-shares">0</span>
-                                <span class="stat-label">Active Samba Shares</span>
+                                <span class="stat-label">Active File Shares</span>
                             </div>
                         </div>
                     </div>
@@ -440,7 +440,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                 <section id="tab-samba" class="tab-panel">
                     <div class="card table-card">
                         <div class="card-header-btn">
-                            <h3>Samba Shared Folders</h3>
+                            <h3>File Shared Folders</h3>
                             <button id="add-share-btn" class="btn btn-secondary btn-sm">+ Add Share</button>
                         </div>
                         <p class="desc-text">Exposed network folders accessible via Windows File Sharing (SMB). Used for backups, show files, and software updates.</p>
@@ -477,7 +477,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                                     <option value="bind9" selected>DNS Service (lightbox-bind9)</option>
                                     <option value="dhcp">DHCP Service (lightbox-dhcp)</option>
                                     <option value="ntp">NTP Service (lightbox-ntp)</option>
-                                    <option value="samba">Samba Service (lightbox-samba)</option>
+                                    <option value="samba">File Service (lightbox-samba)</option>
                                 </select>
                             </div>
                             <div class="logs-actions">
@@ -568,7 +568,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
     <div id="samba-modal" class="modal">
         <div class="modal-content">
             <span class="close-modal">&times;</span>
-            <h3 id="samba-modal-title">Add Samba Shared Folder</h3>
+            <h3 id="samba-modal-title">Add File Shared Folder</h3>
             <form id="samba-share-form">
                 <input type="hidden" id="samba_id" name="id">
                 <div class="form-group">
