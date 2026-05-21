@@ -150,7 +150,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.status === 'success') {
                     // Update System Info
                     document.getElementById('sidebar-uptime').textContent = data.metrics.uptime;
-                    document.getElementById('header-time').textContent = data.metrics.time.split(' ')[1]; // Time part
+                    const timePart = data.metrics.time ? data.metrics.time.split(' ')[1] : new Date().toLocaleTimeString();
+                    document.getElementById('header-time').textContent = timePart; // Time part or local fallback
                     
                     // Update Resource rings
                     document.getElementById('cpu-percent').textContent = `${data.metrics.cpu}%`;
