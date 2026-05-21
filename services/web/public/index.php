@@ -28,7 +28,9 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
             <div class="sidebar-header">
                 <div class="logo-icon"></div>
                 <div class="logo-text">
-                    <h1>Lightbox Server</h1>
+                    <a href="/">
+                        <h1>Lightbox Server</h1>
+                    </a>
                     <span>Network Services</span>
                 </div>
             </div>
@@ -57,7 +59,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                     </li>
                     <li>
                         <a href="#samba" class="nav-link" data-tab="samba">
-                            <span class="icon">📁</span> File Shares
+                            <span class="icon">📁</span> File Sharing
                         </a>
                     </li>
                     <li>
@@ -203,7 +205,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                                     <span class="badge" id="status-ntp">Checking...</span>
                                 </li>
                                 <li>
-                                    <span class="service-name">Samba Sharing (smbd)</span>
+                                    <span class="service-name">File Sharing (smbd)</span>
                                     <span class="badge" id="status-samba">Checking...</span>
                                 </li>
                             </ul>

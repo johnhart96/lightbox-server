@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dns: { title: 'DNS Configuration', desc: 'Manage local name resolution and upstream DNS servers' },
         dhcp: { title: 'DHCP Server', desc: 'Manage IP address assignments and static network reservations' },
         ntp: { title: 'NTP Synchronization', desc: 'Configure system time and network synchronization pools' },
-        samba: { title: 'Samba File Shares', desc: 'Expose storage directories to network clients via SMB' },
+        samba: { title: 'File Sharing', desc: 'Expose storage directories to network clients via SMB' },
         logs: { title: 'Service Logs', desc: 'Inspect live diagnostic logs for system containers' }
     };
 
