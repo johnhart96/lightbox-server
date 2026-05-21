@@ -15,3 +15,5 @@
 * User authentication for the web UI and for file sharing
 * Ability to set the entertainment network IP in the settings UI
 * Add a certificate authority.
+* Reverse DNS
+* Devices tab. See all devices (both DHCP added and mamually added) and see if they are online.
