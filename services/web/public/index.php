@@ -31,7 +31,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                     <a href="/">
                         <h1>Lightbox Server</h1>
                     </a>
-                    <span>Network Services</span>
+                    <span>Entertainment Network Services</span>
                 </div>
             </div>
             
