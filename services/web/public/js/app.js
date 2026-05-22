@@ -319,6 +319,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No custom host records defined.</td></tr>';
                     }
+                    // Populate DHCP hostname DNS entries table
+                    const dhcpTbody = document.querySelector('#dhcp-dns-table tbody');
+                    dhcpTbody.innerHTML = '';
+                    if (data.dhcp_dns_entries && data.dhcp_dns_entries.length > 0) {
+                        data.dhcp_dns_entries.forEach(l => {
+                            const tr = document.createElement('tr');
+                            const sourceLabel = l.source === 'reservation'
+                                ? '<span class="badge active">Reservation</span>'
+                                : '<span class="badge pending">Dynamic</span>';
+                            tr.innerHTML = `
+                                <td><strong>${l.hostname}</strong>.${data.settings.domain_name}</td>
+                                <td><code>${l.ip}</code></td>
+                                <td><span class="badge ${l.type === 'A' ? 'active' : 'pending'}">${l.type}</span></td>
+                                <td>${sourceLabel}</td>
+                                <td class="text-muted">${l.expiry}</td>
+                            `;
+                            dhcpTbody.appendChild(tr);
+                        });
+                    } else {
+                        dhcpTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No DHCP reservations or active leases with hostnames found.</td></tr>';
+                    }
                 }
             });
     }

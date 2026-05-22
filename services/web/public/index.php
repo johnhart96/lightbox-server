@@ -31,7 +31,7 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                     <a href="/">
                         <h1>Lightbox Server</h1>
                     </a>
-                    <span>Entertainment Network Services</span>
+                    <span>Entertainment Network Manager</span>
                 </div>
             </div>
             
@@ -277,28 +277,53 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                             </form>
                         </div>
 
-                        <div class="card table-card">
-                            <div class="card-header-btn">
-                                <h3>Custom Host Records</h3>
-                                <button id="add-dns-record-btn" class="btn btn-secondary btn-sm">+ Add Record</button>
+                        <div style="display: flex; flex-direction: column; gap: 24px;">
+                            <div class="card table-card">
+                                <div class="card-header-btn">
+                                    <h3>Custom Host Records</h3>
+                                    <button id="add-dns-record-btn" class="btn btn-secondary btn-sm">+ Add Record</button>
+                                </div>
+                                <div class="table-wrapper">
+                                    <table id="dns-records-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Hostname</th>
+                                                <th>IP Address</th>
+                                                <th>Type</th>
+                                                <th>Description</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td colspan="5" class="text-center">Loading DNS records...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
-                            <div class="table-wrapper">
-                                <table id="dns-records-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Hostname</th>
-                                            <th>IP Address</th>
-                                            <th>Type</th>
-                                            <th>Description</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td colspan="5" class="text-center">Loading DNS records...</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+
+                            <div class="card table-card">
+                                <h3>DHCP Hostname DNS Entries</h3>
+                                <p class="text-muted" style="margin: 4px 0 14px; font-size: 0.875rem;">DNS entries created automatically from DHCP. Static reservations are always present; dynamic entries update every minute from active leases.</p>
+                                <div class="table-wrapper">
+                                    <table id="dhcp-dns-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Hostname</th>
+                                                <th>IP Address</th>
+                                                <th>Type</th>
+                                                <th>Source</th>
+                                                <th>Lease</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td colspan="5" class="text-center">Loading...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     </div>

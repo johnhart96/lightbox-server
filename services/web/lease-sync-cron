@@ -1,0 +1,2 @@
+# Sync dynamic DHCP leases into the Bind9 DNS zone every minute
+* * * * * root curl -sf -X POST http://localhost/api.php?action=sync_leases >/dev/null 2>&1

@@ -142,15 +142,111 @@ class ConfigGenerator {
 
         // Query DHCP reservations to automatically add DNS records for convenience
         $stmt = $pdo->query("SELECT hostname, ip_address, ip_type FROM dhcp_reservations");
+        $staticHostnames = [];
         if ($stmt->rowCount() > 0) {
             $zoneContent .= "\n; DHCP Static Reservations\n";
             while ($row = $stmt->fetch()) {
                 $type = ($row['ip_type'] === 'IPv6') ? 'AAAA' : 'A';
                 $zoneContent .= sprintf("%-15s IN      %-5s %s\n", $row['hostname'], $type, $row['ip_address']);
+                $staticHostnames[strtolower($row['hostname'])] = true;
+            }
+        }
+
+        // Collect custom record hostnames to avoid duplicates in dynamic section
+        $stmt2 = $pdo->query("SELECT hostname FROM dns_records");
+        while ($row2 = $stmt2->fetch()) {
+            $staticHostnames[strtolower($row2['hostname'])] = true;
+        }
+
+        // Dynamic leases from dnsmasq lease file — add, update, remove automatically
+        $dynamicLeases = $this->parseDynamicLeases($staticHostnames);
+        if (!empty($dynamicLeases)) {
+            $zoneContent .= "\n; Dynamic DHCP Leases\n";
+            foreach ($dynamicLeases as $lease) {
+                $zoneContent .= sprintf("%-15s IN      %-5s %s\n", $lease['hostname'], $lease['type'], $lease['ip']);
             }
         }
 
         file_put_contents($this->bindZonesDir . '/db.' . $domain, $zoneContent);
+    }
+
+    /**
+     * Update only the "; Dynamic DHCP Leases" section of the zone file.
+     * Avoids the docker exec calls inside generateBindConfig() / getHostIPs()
+     * so cron-triggered syncs are fast and don't pile up Apache workers.
+     * Returns true if the file was written.
+     */
+    public function syncDynamicLeases(): bool {
+        $settings  = $this->db->getSettings();
+        $domain    = $settings['domain_name'] ?? 'lighting.local';
+        $zoneFile  = $this->bindZonesDir . '/db.' . $domain;
+
+        if (!file_exists($zoneFile)) return false;
+
+        $pdo = $this->db->getConnection();
+        $skipHostnames = [];
+        $stmt = $pdo->query("SELECT hostname FROM dns_records UNION SELECT hostname FROM dhcp_reservations");
+        while ($row = $stmt->fetch()) {
+            $skipHostnames[strtolower($row['hostname'])] = true;
+        }
+
+        $dynamicLeases = $this->parseDynamicLeases($skipHostnames);
+
+        $content = file_get_contents($zoneFile);
+        $marker  = "\n; Dynamic DHCP Leases\n";
+
+        // Strip existing dynamic section (it's always at the end)
+        $pos = strpos($content, $marker);
+        if ($pos !== false) {
+            $content = substr($content, 0, $pos);
+        }
+
+        if (!empty($dynamicLeases)) {
+            $content .= $marker;
+            foreach ($dynamicLeases as $lease) {
+                $content .= sprintf("%-15s IN      %-5s %s\n", $lease['hostname'], $lease['type'], $lease['ip']);
+            }
+        }
+
+        file_put_contents($zoneFile, $content);
+        return true;
+    }
+
+    private function parseDynamicLeases(array $skipHostnames = []): array {
+        $leaseFile = '/data/dnsmasq/leases';
+        if (!file_exists($leaseFile)) return [];
+
+        $leases = [];
+        $seen = [];
+        $now = time();
+
+        foreach (file($leaseFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+            if (str_starts_with($line, '#') || str_starts_with($line, 'duid')) continue;
+            $parts = explode(' ', $line);
+            if (count($parts) < 4) continue;
+
+            $expiry   = (int)$parts[0];
+            $ip       = trim($parts[2]);
+            $hostname = trim($parts[3]);
+
+            if ($expiry <= $now || $hostname === '' || $hostname === '*') continue;
+
+            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                $type = 'A';
+            } elseif (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                $type = 'AAAA';
+            } else {
+                continue;
+            }
+
+            $key = strtolower($hostname);
+            if (isset($seen[$key]) || isset($skipHostnames[$key])) continue;
+            $seen[$key] = true;
+
+            $leases[] = ['hostname' => $hostname, 'ip' => $ip, 'type' => $type];
+        }
+
+        return $leases;
     }
 
     public function generateDnsmasqConfig() {

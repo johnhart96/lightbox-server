@@ -92,11 +92,37 @@ try {
         case 'dns_get':
             $pdo = $db->getConnection();
             $records = $pdo->query("SELECT * FROM dns_records ORDER BY hostname ASC")->fetchAll();
+
+            // Static reservations always have explicit hostnames and are always in DNS
+            $reservations = $pdo->query("SELECT hostname, ip_address, ip_type FROM dhcp_reservations ORDER BY hostname ASC")->fetchAll();
+            $dhcpDnsEntries = array_map(fn($r) => [
+                'hostname' => $r['hostname'],
+                'ip'       => $r['ip_address'],
+                'type'     => $r['ip_type'] === 'IPv6' ? 'AAAA' : 'A',
+                'expiry'   => 'Static reservation',
+                'source'   => 'reservation',
+            ], $reservations);
+
+            // Dynamic leases from the leases file that include a hostname
+            $staticHostnames = array_map(fn($e) => strtolower($e['hostname']), $dhcpDnsEntries);
+            foreach (getActiveLeases() as $l) {
+                if ($l['hostname'] === 'Unknown') continue;
+                if (in_array(strtolower($l['hostname']), $staticHostnames, true)) continue;
+                $dhcpDnsEntries[] = [
+                    'hostname' => $l['hostname'],
+                    'ip'       => $l['ip'],
+                    'type'     => filter_var($l['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'A' : 'AAAA',
+                    'expiry'   => $l['expiry'],
+                    'source'   => 'dynamic',
+                ];
+            }
+
             echo json_encode([
-                'status'     => 'success',
-                'settings'   => $db->getSettings(),
-                'records'    => $records,
-                'interfaces' => $system->getHostNetworkInterfaces()
+                'status'           => 'success',
+                'settings'         => $db->getSettings(),
+                'records'          => $records,
+                'interfaces'       => $system->getHostNetworkInterfaces(),
+                'dhcp_dns_entries' => $dhcpDnsEntries,
             ]);
             break;
 
@@ -347,6 +373,22 @@ try {
             $ifaceNames   = array_column($interfaces, 'name');
             $connectivity = $system->checkInterfacesConnectivity($ifaceNames);
             echo json_encode(['status' => 'success', 'connectivity' => $connectivity]);
+            break;
+
+        case 'sync_leases':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+
+            $leaseFile    = '/data/dnsmasq/leases';
+            $currentMtime = file_exists($leaseFile) ? (string)filemtime($leaseFile) : '0';
+            $lastMtime    = $db->getSettings()['last_lease_sync_mtime'] ?? '0';
+
+            if ($currentMtime !== $lastMtime) {
+                $generator->syncDynamicLeases();
+                $system->reloadService('bind9');
+                $db->updateSetting('last_lease_sync_mtime', $currentMtime);
+            }
+
+            echo json_encode(['status' => 'success', 'message' => 'DNS synced with DHCP leases.']);
             break;
 
         case 'apply_changes':

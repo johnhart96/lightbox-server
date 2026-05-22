@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     iproute2 \
     iputils-ping \
+    cron \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI to communicate with the host's Docker socket
@@ -32,6 +33,9 @@ WORKDIR /var/www/html
 # Copy application source files into the container
 COPY . /var/www/html
 
+# Install cron job that syncs DHCP leases into DNS every minute
+COPY lease-sync-cron /etc/cron.d/lease-sync
+RUN chmod 0644 /etc/cron.d/lease-sync
 
-# Run database/config initialization script on boot and start Apache
-CMD ["sh", "-c", "chmod 666 /var/run/docker.sock 2>/dev/null; php /var/www/html/init.php && apache2-foreground"]
+# Run database/config initialization script on boot, start cron, then start Apache
+CMD ["sh", "-c", "chmod 666 /var/run/docker.sock 2>/dev/null; cron; php /var/www/html/init.php && apache2-foreground"]
