@@ -1,4 +1,5 @@
 <?php
+ini_set('display_errors', '0');
 header('Content-Type: application/json');
 
 require_once __DIR__ . '/../src/Database.php';
@@ -17,31 +18,60 @@ $action = $_GET['action'] ?? '';
 
 try {
     switch ($action) {
-        case 'status':
+        case 'metrics':
             $settings = $db->getSettings();
             $metrics = $system->getSystemMetrics();
-            
-            // Collect statuses
-            $statuses = [
-                'bind9' => $system->isContainerRunning('lightbox-bind9'),
-                'dhcp' => $system->isContainerRunning('lightbox-dhcp'),
-                'ntp' => $system->isContainerRunning('lightbox-ntp'),
-                'samba' => $system->isContainerRunning('lightbox-samba')
-            ];
-            
-            // Get stats counts
+
             $pdo = $db->getConnection();
             $dnsCount = $pdo->query("SELECT COUNT(*) FROM dns_records")->fetchColumn();
             $shareCount = $pdo->query("SELECT COUNT(*) FROM samba_shares")->fetchColumn();
-            
-            // Count leases
-            $leases = getActiveLeases();
-            $leaseCount = count($leases);
+            $leaseCount = count(getActiveLeases());
 
             echo json_encode([
                 'status' => 'success',
                 'metrics' => $metrics,
-                'services' => $statuses,
+                'stats' => [
+                    'dns_count' => $dnsCount,
+                    'share_count' => $shareCount,
+                    'lease_count' => $leaseCount
+                ],
+                'pending_changes' => (int)($settings['pending_changes'] ?? 0),
+                'interfaces' => $system->getNetworkInterfaces()
+            ]);
+            break;
+
+        case 'services':
+            $running = $system->getRunningContainerNames();
+            echo json_encode([
+                'status' => 'success',
+                'services' => [
+                    'bind9' => in_array('lightbox-bind9', $running, true),
+                    'dhcp'  => in_array('lightbox-dhcp',  $running, true),
+                    'ntp'   => in_array('lightbox-ntp',   $running, true),
+                    'samba' => in_array('lightbox-samba', $running, true)
+                ]
+            ]);
+            break;
+
+        case 'status':
+            $settings = $db->getSettings();
+            $metrics = $system->getSystemMetrics();
+            $running = $system->getRunningContainerNames();
+
+            $pdo = $db->getConnection();
+            $dnsCount = $pdo->query("SELECT COUNT(*) FROM dns_records")->fetchColumn();
+            $shareCount = $pdo->query("SELECT COUNT(*) FROM samba_shares")->fetchColumn();
+            $leaseCount = count(getActiveLeases());
+
+            echo json_encode([
+                'status' => 'success',
+                'metrics' => $metrics,
+                'services' => [
+                    'bind9' => in_array('lightbox-bind9', $running, true),
+                    'dhcp'  => in_array('lightbox-dhcp',  $running, true),
+                    'ntp'   => in_array('lightbox-ntp',   $running, true),
+                    'samba' => in_array('lightbox-samba', $running, true)
+                ],
                 'stats' => [
                     'dns_count' => $dnsCount,
                     'share_count' => $shareCount,

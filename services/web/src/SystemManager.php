@@ -13,7 +13,7 @@ class SystemManager {
             'cpu' => $this->getCpuUsage(),
             'ram' => $this->getRamUsage(),
             'disk' => $this->getDiskUsage(),
-            'load' => sys_getloadavg(),
+            'load' => sys_getloadavg() ?: [0, 0, 0],
             'time' => date('Y-m-d H:i:s T')
         ];
     }
@@ -24,7 +24,7 @@ class SystemManager {
         }
         
         $str = file_get_contents('/proc/uptime');
-        $uptime_sec = floatval(explode(' ', $str)[0]);
+        $uptime_sec = (int)floatval(explode(' ', $str)[0]);
         
         $days = floor($uptime_sec / 86400);
         $hours = floor(($uptime_sec % 86400) / 3600);
@@ -116,7 +116,7 @@ class SystemManager {
      */
     public function getNetworkInterfaces() {
         $interfaces = [];
-        $paths = glob('/sys/class/net/*');
+        $paths = glob('/sys/class/net/*') ?: [];
         
         foreach ($paths as $path) {
             $name = basename($path);
@@ -151,17 +151,20 @@ class SystemManager {
     }
 
     /**
+     * Get all running container names in a single docker call.
+     * Falls back to empty array if docker is unavailable or times out.
+     */
+    public function getRunningContainerNames(): array {
+        $output = shell_exec('timeout 2 docker ps --format ' . escapeshellarg('{{.Names}}'));
+        if (!$output) return [];
+        return array_values(array_filter(array_map('trim', explode("\n", trim($output)))));
+    }
+
+    /**
      * Check if a docker container is running
      */
     public function isContainerRunning($containerName) {
-        $command = sprintf("docker ps --filter \"name=%s\" --format \"{{.Status}}\"", escapeshellarg($containerName));
-        $output = shell_exec($command);
-        if ($output && stripos(trim($output), 'Up') === 0) {
-            // Further verify the container name matches exactly to avoid substring issues
-            $nameCheck = shell_exec(sprintf("docker ps --filter \"name=^/%s$\" --format \"{{.Names}}\"", escapeshellarg($containerName)));
-            return trim($nameCheck) === $containerName;
-        }
-        return false;
+        return in_array($containerName, $this->getRunningContainerNames(), true);
     }
 
     /**

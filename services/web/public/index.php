@@ -607,6 +607,6 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
     <!-- Toast Container for slide-in notifications -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="/js/app.js"></script>
+    <script src="/js/app.js?v=<?= filemtime($_SERVER['DOCUMENT_ROOT'] . '/js/app.js') ?>"></script>
 </body>
 </html>

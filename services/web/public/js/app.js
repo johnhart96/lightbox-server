@@ -144,60 +144,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- POLLING LOGIC FOR STATUS & HEALTH METRICS ---
     function updateStatus() {
-        fetch('/api.php?action=status')
+        // Fire metrics and service status fetches in parallel so slow docker calls
+        // don't block uptime/CPU/RAM/disk from rendering.
+        fetch('/api.php?action=metrics')
             .then(res => res.json())
             .then(data => {
-                if (data.status === 'success') {
-                    // Update System Info
-                    document.getElementById('sidebar-uptime').textContent = data.metrics.uptime;
-                    const timePart = data.metrics.time ? data.metrics.time.split(' ')[1] : new Date().toLocaleTimeString();
-                    document.getElementById('header-time').textContent = timePart; // Time part or local fallback
-                    
-                    // Update Resource rings
-                    document.getElementById('cpu-percent').textContent = `${data.metrics.cpu}%`;
-                    setProgress('cpu-ring', data.metrics.cpu);
+                if (data.status !== 'success') return;
 
-                    document.getElementById('ram-percent').textContent = `${data.metrics.ram.percent}%`;
-                    setProgress('ram-ring', data.metrics.ram.percent);
-                    document.getElementById('ram-details').textContent = `${data.metrics.ram.used} GB / ${data.metrics.ram.total} GB`;
+                document.getElementById('sidebar-uptime').textContent = data.metrics.uptime;
+                const timePart = data.metrics.time ? data.metrics.time.split(' ')[1] : new Date().toLocaleTimeString();
+                document.getElementById('header-time').textContent = timePart;
 
-                    document.getElementById('disk-percent').textContent = `${data.metrics.disk.percent}%`;
-                    setProgress('disk-ring', data.metrics.disk.percent);
-                    document.getElementById('disk-details').textContent = `${data.metrics.disk.used} GB / ${data.metrics.disk.total} GB`;
+                document.getElementById('cpu-percent').textContent = `${data.metrics.cpu}%`;
+                setProgress('cpu-ring', data.metrics.cpu);
 
-                    document.getElementById('load-avg').textContent = data.metrics.load.join(', ');
+                document.getElementById('ram-percent').textContent = `${data.metrics.ram.percent}%`;
+                setProgress('ram-ring', data.metrics.ram.percent);
+                document.getElementById('ram-details').textContent = `${data.metrics.ram.used} GB / ${data.metrics.ram.total} GB`;
 
-                    // Update Services Badges
-                    updateServiceBadge('status-bind9', data.services.bind9);
-                    updateServiceBadge('status-dhcp', data.services.dhcp);
-                    updateServiceBadge('status-ntp', data.services.ntp);
-                    updateServiceBadge('status-samba', data.services.samba);
+                document.getElementById('disk-percent').textContent = `${data.metrics.disk.percent}%`;
+                setProgress('disk-ring', data.metrics.disk.percent);
+                document.getElementById('disk-details').textContent = `${data.metrics.disk.used} GB / ${data.metrics.disk.total} GB`;
 
-                    // Update counters
-                    document.getElementById('stat-leases').textContent = data.stats.lease_count;
-                    document.getElementById('stat-dns-records').textContent = data.stats.dns_count;
-                    document.getElementById('stat-shares').textContent = data.stats.share_count;
+                document.getElementById('load-avg').textContent = data.metrics.load.join(', ');
 
-                    // Update Apply Changes Button
-                    if (data.pending_changes === 1) {
-                        applyBtn.classList.remove('hidden');
-                    } else {
-                        applyBtn.classList.add('hidden');
-                    }
+                document.getElementById('stat-leases').textContent = data.stats.lease_count;
+                document.getElementById('stat-dns-records').textContent = data.stats.dns_count;
+                document.getElementById('stat-shares').textContent = data.stats.share_count;
 
-                    // Populate network interface select if it's empty (just once)
-                    const intSelect = document.getElementById('dhcp_interface');
-                    if (intSelect && intSelect.options.length === 1 && data.interfaces) {
-                        data.interfaces.forEach(i => {
-                            const opt = document.createElement('option');
-                            opt.value = i.name;
-                            opt.textContent = `${i.name} (${i.ip || 'No IP'} - ${i.status.toUpperCase()})`;
-                            intSelect.appendChild(opt);
-                        });
-                    }
+                if (data.pending_changes === 1) {
+                    applyBtn.classList.remove('hidden');
+                } else {
+                    applyBtn.classList.add('hidden');
+                }
+
+                const intSelect = document.getElementById('dhcp_interface');
+                if (intSelect && intSelect.options.length === 1 && data.interfaces) {
+                    data.interfaces.forEach(i => {
+                        const opt = document.createElement('option');
+                        opt.value = i.name;
+                        opt.textContent = `${i.name} (${i.ip || 'No IP'} - ${i.status.toUpperCase()})`;
+                        intSelect.appendChild(opt);
+                    });
                 }
             })
-            .catch(err => console.error('Error fetching system status:', err));
+            .catch(err => console.error('Error fetching metrics:', err));
+
+        fetch('/api.php?action=services')
+            .then(res => res.json())
+            .then(data => {
+                if (data.status !== 'success') return;
+                updateServiceBadge('status-bind9', data.services.bind9);
+                updateServiceBadge('status-dhcp', data.services.dhcp);
+                updateServiceBadge('status-ntp', data.services.ntp);
+                updateServiceBadge('status-samba', data.services.samba);
+            })
+            .catch(err => console.error('Error fetching service status:', err));
     }
 
     function updateServiceBadge(elementId, isRunning) {

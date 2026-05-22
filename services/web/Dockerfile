@@ -34,4 +34,4 @@ COPY . /var/www/html
 
 
 # Run database/config initialization script on boot and start Apache
-CMD ["sh", "-c", "php /var/www/html/init.php && apache2-foreground"]
+CMD ["sh", "-c", "chmod 666 /var/run/docker.sock 2>/dev/null; php /var/www/html/init.php && apache2-foreground"]
