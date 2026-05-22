@@ -13,6 +13,14 @@ services:
     environment:
       - TZ=UTC
     restart: unless-stopped
+    # Apache only starts after init.php succeeds, so a passing health check
+    # guarantees all config files in data/ have been generated.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
 
   bind9:
     image: ubuntu/bind9:latest
@@ -27,7 +35,8 @@ services:
       - ./data/bind/cache:/var/cache/bind
     restart: unless-stopped
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
   dhcp:
     build:
@@ -41,7 +50,8 @@ services:
       - ./data/network:/data/network
     restart: unless-stopped
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
   ntp:
     build:
@@ -54,7 +64,8 @@ services:
       - ./data/chrony:/etc/chrony
     restart: unless-stopped
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
   samba:
     build:
@@ -66,7 +77,8 @@ services:
       - ./data/shares:/shares
     restart: unless-stopped
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
   acn:
     build:
@@ -79,4 +91,5 @@ services:
       - STARTUP_DELAY=15
     restart: unless-stopped
     depends_on:
-      - web
+      web:
+        condition: service_healthy
