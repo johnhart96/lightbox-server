@@ -552,6 +552,26 @@ try {
             }
             break;
 
+        case 'service_toggle':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $allowed = ['bind9' => 'lightbox-bind9', 'dhcp' => 'lightbox-dhcp', 'ntp' => 'lightbox-ntp', 'samba' => 'lightbox-samba', 'acn' => 'lightbox-acn'];
+            $service = $_POST['service'] ?? '';
+            $state   = $_POST['state']   ?? '';
+
+            if (!isset($allowed[$service])) throw new Exception('Unknown service.');
+            if (!in_array($state, ['start', 'stop'], true)) throw new Exception('Invalid state.');
+
+            $container = $allowed[$service];
+            if ($state === 'start') {
+                $ok = $system->startContainer($container);
+            } else {
+                $ok = $system->stopContainer($container);
+            }
+
+            if (!$ok) throw new Exception("Failed to $state $service.");
+            echo json_encode(['status' => 'success', 'message' => ucfirst($state) . 'ed ' . $service . '.']);
+            break;
+
         case 'logs_get':
             $service = $_GET['service'] ?? 'web';
             $logs = $system->getServiceLogs($service);

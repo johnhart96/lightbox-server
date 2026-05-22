@@ -234,23 +234,53 @@ $currentUser = Auth::currentUser();
                             <ul class="service-list">
                                 <li>
                                     <span class="service-name">DNS Server (Bind9)</span>
-                                    <span class="badge" id="status-bind9">Checking...</span>
+                                    <div class="service-controls">
+                                        <span class="badge" id="status-bind9">Checking...</span>
+                                        <label class="switch" title="Enable / disable DNS Server">
+                                            <input type="checkbox" id="toggle-bind9" data-service="bind9" disabled>
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
                                 </li>
                                 <li>
                                     <span class="service-name">DHCP Server (dnsmasq)</span>
-                                    <span class="badge" id="status-dhcp">Checking...</span>
+                                    <div class="service-controls">
+                                        <span class="badge" id="status-dhcp">Checking...</span>
+                                        <label class="switch" title="Enable / disable DHCP Server">
+                                            <input type="checkbox" id="toggle-dhcp" data-service="dhcp" data-warn="Stopping the DHCP container will also disable network interface management." disabled>
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
                                 </li>
                                 <li>
                                     <span class="service-name">NTP Service (Chrony)</span>
-                                    <span class="badge" id="status-ntp">Checking...</span>
+                                    <div class="service-controls">
+                                        <span class="badge" id="status-ntp">Checking...</span>
+                                        <label class="switch" title="Enable / disable NTP Service">
+                                            <input type="checkbox" id="toggle-ntp" data-service="ntp" disabled>
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
                                 </li>
                                 <li>
                                     <span class="service-name">File Sharing (smbd)</span>
-                                    <span class="badge" id="status-samba">Checking...</span>
+                                    <div class="service-controls">
+                                        <span class="badge" id="status-samba">Checking...</span>
+                                        <label class="switch" title="Enable / disable File Sharing">
+                                            <input type="checkbox" id="toggle-samba" data-service="samba" disabled>
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
                                 </li>
                                 <li>
                                     <span class="service-name">ACN / Art-Poll Discovery (SLP)</span>
-                                    <span class="badge" id="status-acn">Checking...</span>
+                                    <div class="service-controls">
+                                        <span class="badge" id="status-acn">Checking...</span>
+                                        <label class="switch" title="Enable / disable ACN Discovery">
+                                            <input type="checkbox" id="toggle-acn" data-service="acn" disabled>
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
                                 </li>
                             </ul>
                         </div>

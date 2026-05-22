@@ -504,6 +504,21 @@ body {
     font-weight: 500;
 }
 
+.service-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.service-controls .switch {
+    flex-shrink: 0;
+}
+
+.service-controls .switch input:disabled + .slider {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .badge {
     padding: 6px 12px;
     border-radius: 30px;

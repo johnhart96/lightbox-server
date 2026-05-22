@@ -319,6 +319,18 @@ class SystemManager {
         return strpos($output, $containerName) !== false;
     }
 
+    public function startContainer($containerName) {
+        $command = sprintf("docker start %s 2>&1", escapeshellarg($containerName));
+        $output = shell_exec($command) ?? '';
+        return strpos($output, $containerName) !== false;
+    }
+
+    public function stopContainer($containerName) {
+        $command = sprintf("docker stop %s 2>&1", escapeshellarg($containerName));
+        $output = shell_exec($command) ?? '';
+        return strpos($output, $containerName) !== false;
+    }
+
     /**
      * Reload service config inside container if supported, else restart container
      */

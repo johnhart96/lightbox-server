@@ -233,11 +233,11 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(res => res.json())
             .then(data => {
                 if (data.status !== 'success') return;
-                updateServiceBadge('status-bind9', data.services.bind9);
-                updateServiceBadge('status-dhcp', data.services.dhcp);
-                updateServiceBadge('status-ntp', data.services.ntp);
-                updateServiceBadge('status-samba', data.services.samba);
-                updateServiceBadge('status-acn', data.services.acn);
+                const map = { bind9: data.services.bind9, dhcp: data.services.dhcp, ntp: data.services.ntp, samba: data.services.samba, acn: data.services.acn };
+                for (const [svc, running] of Object.entries(map)) {
+                    updateServiceBadge('status-' + svc, running);
+                    syncServiceToggle(svc, running);
+                }
             })
             .catch(err => console.error('Error fetching service status:', err));
     }
@@ -245,16 +245,54 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateServiceBadge(elementId, isRunning) {
         const badge = document.getElementById(elementId);
         if (!badge) return;
-        
         badge.className = 'badge';
-        if (isRunning) {
-            badge.classList.add('active');
-            badge.textContent = 'Active';
-        } else {
-            badge.classList.add('inactive');
-            badge.textContent = 'Inactive';
-        }
+        badge.classList.add(isRunning ? 'active' : 'inactive');
+        badge.textContent = isRunning ? 'Active' : 'Inactive';
     }
+
+    function syncServiceToggle(svc, isRunning) {
+        const toggle = document.getElementById('toggle-' + svc);
+        if (!toggle || toggle._busy) return;
+        toggle.checked = isRunning;
+        toggle.disabled = false;
+    }
+
+    function toggleService(svc, enable) {
+        const toggle = document.getElementById('toggle-' + svc);
+        if (!toggle) return;
+
+        const warn = toggle.dataset.warn;
+        if (!enable && warn && !confirm(warn + '\n\nContinue?')) {
+            toggle.checked = true;
+            return;
+        }
+
+        toggle._busy = true;
+        toggle.disabled = true;
+
+        const body = new URLSearchParams({ service: svc, state: enable ? 'start' : 'stop' });
+        fetch('/api.php?action=service_toggle', { method: 'POST', body })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status !== 'success') {
+                    toggle.checked = !enable;
+                    alert(data.message || 'Failed to toggle service.');
+                }
+            })
+            .catch(() => { toggle.checked = !enable; })
+            .finally(() => {
+                toggle._busy = false;
+                toggle.disabled = false;
+                updateStatus();
+            });
+    }
+
+    document.querySelectorAll('[id^="toggle-"]').forEach(input => {
+        input.addEventListener('change', () => {
+            const svc = input.dataset.service;
+            if (svc) toggleService(svc, input.checked);
+        });
+    });
 
     // Start Polling System Status
     updateStatus();
