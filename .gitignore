@@ -1,8 +1,31 @@
-# Ignore user‑generated data directories
-# All data stored under the top‑level 'data' folder is runtime data and should not be version‑controlled.
-/data/
+# Runtime-generated data inside data/ — structure is tracked, content is not.
+# The directory skeleton and placeholder files must exist in git so that Docker
+# never has to create bind-mount source paths itself (it would create directories
+# for file-level mounts, breaking named).
 
-# Optional: ignore any local SQLite database files if they are placed elsewhere
-.sqlite
+# Databases
+/data/db/*.db
+/data/db/*.sqlite
+
+# DHCP lease file (written by dnsmasq at runtime)
+/data/dnsmasq/leases
+
+# Generated DNS zone files (db.<domain>) — not the directory itself
+/data/bind/zones/db.*
+
+# BIND cache (populated by named at runtime)
+/data/bind/cache/*
+!/data/bind/cache/.gitkeep
+
+# Samba runtime user list (written by the web API)
+/data/samba/linux_users.conf
+
+# Share contents (user files — arbitrarily large)
+/data/shares/ShowFiles/*
+!/data/shares/ShowFiles/.gitkeep
+
+# SQLite files placed outside data/ (safety net)
+*.sqlite
 *.db
+
 .claude/
