@@ -5,3 +5,4 @@
 # Optional: ignore any local SQLite database files if they are placed elsewhere
 .sqlite
 *.db
+.claude/
