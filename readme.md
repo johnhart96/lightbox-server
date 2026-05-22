@@ -42,3 +42,9 @@ By replacing manual configuration files with an intuitive web interface, Lightbo
 
 *   **Primary:** Raspberry Pi (Raspberry Pi OS / Debian Buster or Bullseye+)
 *   **Alternative:** Any bare-metal or virtualized machine running standard **Debian** or **Ubuntu**.
+
+## How to install
+1) Install docker on your machine
+2) Clone the repo ```git clone https://github.com/johnhart96/lightbox-server.git```
+3) Run: ```docker compose build```
+4) Run: ```docker compose up -d```
