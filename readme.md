@@ -20,13 +20,13 @@ By replacing manual configuration files with an intuitive web interface, Lightbo
 *   **Automated Device Discovery (ANSI E1.17):** Listen for Architecture for Control Networks (ACN) traffic to automatically discover production hardware and register matching local DNS entries.
 *   **Unified Devices Tab:** An inventory dashboard tracking all manually assigned and DHCP-leased devices with real-time online/offline status tracking.
 *   **Access Control:** Robust user authentication layers for both the management Web UI and underlying Samba fileshares.
-
+*   **Service Toggles:** A quick-access settings dialog to easily spin services up or down (utilizing `docker start / stop` backends).
 ---
 
 ## 🗺️ Roadmap & In-Progress
 
 ### ⚡ Active Development
-*   **Service Toggles:** A quick-access settings dialog to easily spin services up or down (utilizing `docker start / stop` backends).
+
 ### 🛠️ Upcoming Features
 
 *   **TFTP Deployment:** Dedicate a specific fileshare directory to act as a TFTP root, streamlining firmware updates for lighting nodes and fixtures.
