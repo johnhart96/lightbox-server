@@ -43,6 +43,11 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                         </a>
                     </li>
                     <li>
+                        <a href="#devices" class="nav-link" data-tab="devices">
+                            <span class="icon">📡</span> Devices
+                        </a>
+                    </li>
+                    <li>
                         <a href="#dns" class="nav-link" data-tab="dns">
                             <span class="icon">🌐</span> DNS Settings
                         </a>
@@ -212,6 +217,10 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                                 <li>
                                     <span class="service-name">File Sharing (smbd)</span>
                                     <span class="badge" id="status-samba">Checking...</span>
+                                </li>
+                                <li>
+                                    <span class="service-name">ACN / Art-Poll Discovery (SLP)</span>
+                                    <span class="badge" id="status-acn">Checking...</span>
                                 </li>
                             </ul>
                         </div>
@@ -527,6 +536,37 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                     </div>
                     <div id="interfaces-grid" class="interfaces-grid">
                         <p class="text-muted text-center">Loading network interfaces...</p>
+                    </div>
+                </section>
+
+                <!-- Tab: Devices -->
+                <section id="tab-devices" class="tab-panel">
+                    <div class="card table-card">
+                        <div class="card-header-btn">
+                            <h3>Network Devices</h3>
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <span id="devices-summary" class="text-muted" style="font-size:0.875rem;"></span>
+                                <button id="refresh-devices-btn" class="btn btn-secondary btn-sm">Re-ping All</button>
+                            </div>
+                        </div>
+                        <p class="desc-text">All devices registered in local DNS. Source is shown for each entry; ping status is checked live.</p>
+                        <div class="table-wrapper">
+                            <table id="devices-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:90px;">Status</th>
+                                        <th>Hostname</th>
+                                        <th>IP Address</th>
+                                        <th>FQDN</th>
+                                        <th>Source</th>
+                                        <th>Info</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="6" class="text-center">Loading devices...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </section>
 

@@ -497,6 +497,46 @@ body {
     border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
+.badge.acn {
+    background-color: rgba(124, 58, 237, 0.1);
+    color: #a78bfa;
+    border: 1px solid rgba(124, 58, 237, 0.2);
+}
+
+/* Devices tab — ping status indicator */
+.ping-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+}
+
+.ping-text {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.status-pulse.ping-checking {
+    background-color: var(--text-muted);
+    box-shadow: none;
+    animation: ping-blink 1.1s ease-in-out infinite;
+}
+
+.status-pulse.ping-offline {
+    background-color: var(--color-red);
+    box-shadow: none;
+}
+
+@keyframes ping-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.2; }
+}
+
+.fqdn-cell {
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+}
+
 /* Tables design */
 .table-wrapper {
     overflow-x: auto;

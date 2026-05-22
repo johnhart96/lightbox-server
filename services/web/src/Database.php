@@ -108,6 +108,15 @@ class Database {
             v6_gateway     TEXT NOT NULL DEFAULT ''
         )");
 
+        // 8. ACN discovered devices (ANSI E1.17 / SLP)
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS acn_devices (
+            cid         TEXT PRIMARY KEY,
+            hostname    TEXT NOT NULL,
+            ip_address  TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            last_seen   INTEGER NOT NULL
+        )");
+
         // Seed default settings if empty
         $stmt = $this->pdo->query("SELECT COUNT(*) FROM settings");
         if ($stmt->fetchColumn() == 0) {

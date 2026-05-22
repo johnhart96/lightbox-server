@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ntp: { title: 'NTP Synchronization', desc: 'Configure system time and network synchronization pools' },
         samba: { title: 'File Sharing', desc: 'Expose storage directories to network clients via SMB' },
         network: { title: 'Network Interfaces', desc: 'Assign IPv4 and IPv6 addresses to host network interfaces' },
+        devices: { title: 'Network Devices', desc: 'All DNS-registered devices with live reachability status' },
         logs: { title: 'Service Logs', desc: 'Inspect live diagnostic logs for system containers' }
     };
 
@@ -42,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tabId === 'samba') loadSambaData();
         if (tabId === 'logs') loadLogsData();
         if (tabId === 'network') loadNetworkData();
+        if (tabId === 'devices') loadDevices();
         if (tabId === 'dashboard') loadLeases();
     }
 
@@ -202,6 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateServiceBadge('status-dhcp', data.services.dhcp);
                 updateServiceBadge('status-ntp', data.services.ntp);
                 updateServiceBadge('status-samba', data.services.samba);
+                updateServiceBadge('status-acn', data.services.acn);
             })
             .catch(err => console.error('Error fetching service status:', err));
     }
@@ -327,7 +330,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             const tr = document.createElement('tr');
                             const sourceLabel = l.source === 'reservation'
                                 ? '<span class="badge active">Reservation</span>'
-                                : '<span class="badge pending">Dynamic</span>';
+                                : l.source === 'acn'
+                                    ? `<span class="badge acn" title="${l.description || 'ACN device'}">ACN</span>`
+                                    : '<span class="badge pending">Dynamic</span>';
                             tr.innerHTML = `
                                 <td><strong>${l.hostname}</strong>.${data.settings.domain_name}</td>
                                 <td><code>${l.ip}</code></td>
@@ -861,6 +866,99 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error(err);
             });
     }
+
+    // --- TAB: DEVICES ---
+    function loadDevices() {
+        const tbody   = document.querySelector('#devices-table tbody');
+        const summary = document.getElementById('devices-summary');
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading devices...</td></tr>';
+        summary.textContent = '';
+
+        fetch('/api.php?action=devices_get')
+            .then(res => res.json())
+            .then(data => {
+                if (data.status !== 'success') {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Failed to load devices.</td></tr>';
+                    return;
+                }
+                const devices = data.devices || [];
+                tbody.innerHTML = '';
+                if (devices.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No devices found in DNS.</td></tr>';
+                    return;
+                }
+
+                const count = devices.length;
+                summary.textContent = `${count} device${count !== 1 ? 's' : ''} — pinging…`;
+
+                const sourceBadge = {
+                    custom:      '<span class="badge active">Custom</span>',
+                    reservation: '<span class="badge active">Reservation</span>',
+                    dynamic:     '<span class="badge pending">Dynamic</span>',
+                    acn:         '<span class="badge acn">ACN</span>',
+                };
+
+                devices.forEach((device, idx) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>
+                            <div class="ping-status">
+                                <span class="status-pulse ping-checking" id="ping-dot-${idx}"></span>
+                                <span class="ping-text" id="ping-text-${idx}">Checking</span>
+                            </div>
+                        </td>
+                        <td><strong>${device.hostname}</strong></td>
+                        <td><code>${device.ip}</code></td>
+                        <td class="text-muted fqdn-cell">${device.hostname}.${data.domain}</td>
+                        <td>${sourceBadge[device.source] || `<span class="badge">${device.source}</span>`}</td>
+                        <td class="text-muted">${device.info || ''}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                let online = 0, done = 0;
+                devices.forEach((device, idx) => {
+                    fetch(`/api.php?action=ping&ip=${encodeURIComponent(device.ip)}`)
+                        .then(res => res.json())
+                        .then(result => {
+                            const dot  = document.getElementById(`ping-dot-${idx}`);
+                            const text = document.getElementById(`ping-text-${idx}`);
+                            if (!dot) return;
+                            dot.classList.remove('ping-checking');
+                            if (result.online) {
+                                dot.classList.add('green');
+                                text.textContent = 'Online';
+                                text.style.color = 'var(--color-green)';
+                                online++;
+                            } else {
+                                dot.classList.add('ping-offline');
+                                text.textContent = 'Offline';
+                                text.style.color = 'var(--color-red)';
+                            }
+                        })
+                        .catch(() => {
+                            const dot  = document.getElementById(`ping-dot-${idx}`);
+                            const text = document.getElementById(`ping-text-${idx}`);
+                            if (!dot) return;
+                            dot.classList.remove('ping-checking');
+                            dot.classList.add('ping-offline');
+                            text.textContent = 'Error';
+                        })
+                        .finally(() => {
+                            done++;
+                            if (done === count) {
+                                summary.textContent = `${count} device${count !== 1 ? 's' : ''} — ${online} online, ${count - online} offline`;
+                            }
+                        });
+                });
+            })
+            .catch(() => {
+                document.querySelector('#devices-table tbody').innerHTML =
+                    '<tr><td colspan="6" class="text-center text-muted">Error connecting to API.</td></tr>';
+            });
+    }
+
+    document.getElementById('refresh-devices-btn').addEventListener('click', loadDevices);
 
     networkForm.addEventListener('submit', (e) => {
         e.preventDefault();

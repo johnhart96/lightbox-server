@@ -294,31 +294,6 @@ class SystemManager {
     }
 
     /**
-     * Ensure the server has the ::1 address of the DHCPv6 prefix on the given interface.
-     * Called during apply_changes so clients can actually reach the advertised IPv6 DNS/NTP address.
-     */
-    public function ensureServerIPv6(string $iface, string $v6Prefix): void {
-        $parts      = explode('/', $v6Prefix);
-        $networkAddr = $parts[0];
-        $prefixLen   = $parts[1] ?? '64';
-        $serverV6    = (substr($networkAddr, -2) === '::') ? $networkAddr . '1' : rtrim($networkAddr, ':') . '::1';
-        $cidr        = $serverV6 . '/' . $prefixLen;
-
-        $existing = shell_exec(sprintf(
-            "docker exec lightbox-dhcp ip -6 addr show dev %s 2>/dev/null",
-            escapeshellarg($iface)
-        )) ?? '';
-
-        if (strpos($existing, $serverV6) === false) {
-            shell_exec(sprintf(
-                "docker exec lightbox-dhcp ip -6 addr add %s dev %s 2>/dev/null",
-                escapeshellarg($cidr),
-                escapeshellarg($iface)
-            ));
-        }
-    }
-
-    /**
      * Get all running container names in a single docker call.
      * Falls back to empty array if docker is unavailable or times out.
      */

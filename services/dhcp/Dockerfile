@@ -1,11 +1,13 @@
 FROM alpine:latest
 
-# Install dnsmasq
+# Install dnsmasq and iproute2 (for ip addr/route commands in entrypoint)
 RUN apk add --no-cache dnsmasq iproute2
 
 # Create directories and configuration
-RUN mkdir -p /etc/dnsmasq.d
-COPY dnsmasq.conf /etc/dnsmasq.conf
+RUN mkdir -p /etc/dnsmasq.d /data/network
 
-# Start dnsmasq in foreground
-ENTRYPOINT ["dnsmasq", "--no-daemon", "--conf-file=/etc/dnsmasq.conf"]
+COPY dnsmasq.conf /etc/dnsmasq.conf
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

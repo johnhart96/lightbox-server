@@ -8,7 +8,11 @@
       "PowerShell(Tree \"c:\\\\Users\\\\jhart\\\\Projects\\\\lightbox-server\" -L 3)",
       "Bash(cd /tmp)",
       "Bash(sqlite3 \"c:\\\\Users\\\\jhart\\\\Projects\\\\lightbox-server\\\\data\\\\db\\\\lightbox.db\" \".schema\")",
-      "PowerShell(\\(Get-Command docker -ErrorAction SilentlyContinue\\).Source; \\(Get-Command docker.exe -ErrorAction SilentlyContinue\\).Source; $env:PATH -split ';' | Select-String -Pattern docker -SimpleMatch)"
+      "PowerShell(\\(Get-Command docker -ErrorAction SilentlyContinue\\).Source; \\(Get-Command docker.exe -ErrorAction SilentlyContinue\\).Source; $env:PATH -split ';' | Select-String -Pattern docker -SimpleMatch)",
+      "Bash(mkdir -p \"c:/Users/jhart/Projects/lightbox-server/services/acn\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\jhart\\Projects\\lightbox-server\\services"
     ]
   }
 }

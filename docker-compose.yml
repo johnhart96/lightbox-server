@@ -38,6 +38,7 @@ services:
       - NET_ADMIN
     volumes:
       - ./data/dnsmasq:/etc/dnsmasq.d
+      - ./data/network:/data/network
     restart: unless-stopped
     depends_on:
       - web
@@ -63,6 +64,19 @@ services:
     volumes:
       - ./data/samba:/etc/samba
       - ./data/shares:/shares
+    restart: unless-stopped
+    depends_on:
+      - web
+
+  acn:
+    build:
+      context: ./services/acn
+    container_name: lightbox-acn
+    network_mode: host
+    environment:
+      - API_URL=http://localhost:8080/api.php
+      - POLL_INTERVAL=30
+      - STARTUP_DELAY=15
     restart: unless-stopped
     depends_on:
       - web

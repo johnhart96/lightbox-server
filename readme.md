@@ -17,14 +17,14 @@ By replacing manual configuration files with an intuitive web interface, Lightbo
 *   **Resource Monitoring:** Real-time visibility into CPU, memory, temperature, and storage utilization.
 *   **Log Aggregation:** View live log outputs from all running underlying services inside the UI.
 *   **Data Portability:** Seamless configuration backup and restore—export or import the application database (`lightbox.db`) with one click.
+*   **Automated Device Discovery (ANSI E1.17):** Listen for Architecture for Control Networks (ACN) traffic to automatically discover production hardware and register matching local DNS entries.
+*   **Unified Devices Tab:** An inventory dashboard tracking all manually assigned and DHCP-leased devices with real-time online/offline status tracking.
 
 ---
 
 ## 🗺️ Roadmap & In-Progress
 
 ### ⚡ Active Development
-*   **Automated Device Discovery (ANSI E1.17):** Listen for Architecture for Control Networks (ACN) traffic to automatically discover production hardware and register matching local DNS entries.
-*   **Unified Devices Tab:** An inventory dashboard tracking all manually assigned and DHCP-leased devices with real-time online/offline status tracking.
 
 ### 🛠️ Upcoming Features
 *   **Service Toggles:** A quick-access settings dialog to easily spin services up or down (utilizing `docker start / stop` backends).

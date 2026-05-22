@@ -48,7 +48,8 @@ try {
                     'bind9' => in_array('lightbox-bind9', $running, true),
                     'dhcp'  => in_array('lightbox-dhcp',  $running, true),
                     'ntp'   => in_array('lightbox-ntp',   $running, true),
-                    'samba' => in_array('lightbox-samba', $running, true)
+                    'samba' => in_array('lightbox-samba', $running, true),
+                    'acn'   => in_array('lightbox-acn',   $running, true)
                 ]
             ]);
             break;
@@ -70,7 +71,8 @@ try {
                     'bind9' => in_array('lightbox-bind9', $running, true),
                     'dhcp'  => in_array('lightbox-dhcp',  $running, true),
                     'ntp'   => in_array('lightbox-ntp',   $running, true),
-                    'samba' => in_array('lightbox-samba', $running, true)
+                    'samba' => in_array('lightbox-samba', $running, true),
+                    'acn'   => in_array('lightbox-acn',   $running, true)
                 ],
                 'stats' => [
                     'dns_count' => $dnsCount,
@@ -104,16 +106,34 @@ try {
             ], $reservations);
 
             // Dynamic leases from the leases file that include a hostname
-            $staticHostnames = array_map(fn($e) => strtolower($e['hostname']), $dhcpDnsEntries);
+            $seenHostnames = array_map(fn($e) => strtolower($e['hostname']), $dhcpDnsEntries);
             foreach (getActiveLeases() as $l) {
                 if ($l['hostname'] === 'Unknown') continue;
-                if (in_array(strtolower($l['hostname']), $staticHostnames, true)) continue;
+                if (in_array(strtolower($l['hostname']), $seenHostnames, true)) continue;
+                $seenHostnames[] = strtolower($l['hostname']);
                 $dhcpDnsEntries[] = [
                     'hostname' => $l['hostname'],
                     'ip'       => $l['ip'],
                     'type'     => filter_var($l['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'A' : 'AAAA',
                     'expiry'   => $l['expiry'],
                     'source'   => 'dynamic',
+                ];
+            }
+
+            // ACN discovered devices
+            $stale   = time() - 600;
+            $acnRows = $pdo->query("SELECT cid, hostname, ip_address, description, last_seen FROM acn_devices WHERE last_seen > $stale ORDER BY hostname ASC")->fetchAll();
+            foreach ($acnRows as $a) {
+                if (in_array(strtolower($a['hostname']), $seenHostnames, true)) continue;
+                $seenHostnames[] = strtolower($a['hostname']);
+                $ago = max(0, (int)round((time() - $a['last_seen']) / 60));
+                $dhcpDnsEntries[] = [
+                    'hostname'    => $a['hostname'],
+                    'ip'          => $a['ip_address'],
+                    'type'        => filter_var($a['ip_address'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'A' : 'AAAA',
+                    'expiry'      => $ago === 0 ? 'Just seen' : "Seen {$ago}m ago",
+                    'source'      => 'acn',
+                    'description' => $a['description'],
                 ];
             }
 
@@ -375,6 +395,39 @@ try {
             echo json_encode(['status' => 'success', 'connectivity' => $connectivity]);
             break;
 
+        case 'acn_sync':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $cid      = trim($_POST['cid']         ?? '');
+            $hostname = trim($_POST['hostname']     ?? '');
+            $ip       = trim($_POST['ip_address']   ?? '');
+            $desc     = trim($_POST['description']  ?? '');
+
+            if (empty($hostname) || empty($ip)) throw new Exception('hostname and ip_address required');
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) throw new Exception('Invalid IP address');
+
+            $pdo = $db->getConnection();
+            $key = $cid ?: $ip;
+
+            // Only sync DNS if the device is new or its IP changed
+            $prev = $pdo->prepare("SELECT ip_address FROM acn_devices WHERE cid = :k");
+            $prev->execute([':k' => $key]);
+            $old     = $prev->fetchColumn();
+            $changed = ($old === false || $old !== $ip);
+
+            $upsert = $pdo->prepare(
+                "INSERT OR REPLACE INTO acn_devices (cid, hostname, ip_address, description, last_seen)
+                 VALUES (:cid, :hostname, :ip, :desc, :now)"
+            );
+            $upsert->execute([':cid' => $key, ':hostname' => $hostname, ':ip' => $ip, ':desc' => $desc, ':now' => time()]);
+
+            if ($changed) {
+                $generator->syncDynamicLeases();
+                $system->reloadService('bind9');
+            }
+
+            echo json_encode(['status' => 'success', 'changed' => $changed]);
+            break;
+
         case 'sync_leases':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
 
@@ -391,22 +444,70 @@ try {
             echo json_encode(['status' => 'success', 'message' => 'DNS synced with DHCP leases.']);
             break;
 
+        case 'devices_get':
+            $pdo      = $db->getConnection();
+            $settings = $db->getSettings();
+            $domain   = $settings['domain_name'] ?? 'lighting.local';
+            $devices  = [];
+            $seen     = [];
+
+            // Custom DNS A records
+            $rows = $pdo->query("SELECT hostname, ip_address, description FROM dns_records WHERE ip_type = 'A' ORDER BY hostname")->fetchAll();
+            foreach ($rows as $r) {
+                $key = strtolower($r['hostname']);
+                if (in_array($key, $seen, true)) continue;
+                $seen[]    = $key;
+                $devices[] = ['hostname' => $r['hostname'], 'ip' => $r['ip_address'], 'source' => 'custom',      'info' => $r['description'] ?: ''];
+            }
+
+            // DHCP static reservations (IPv4 only)
+            $rows = $pdo->query("SELECT hostname, ip_address, mac_address FROM dhcp_reservations WHERE ip_type = 'IPv4' ORDER BY hostname")->fetchAll();
+            foreach ($rows as $r) {
+                $key = strtolower($r['hostname']);
+                if (in_array($key, $seen, true)) continue;
+                $seen[]    = $key;
+                $devices[] = ['hostname' => $r['hostname'], 'ip' => $r['ip_address'], 'source' => 'reservation', 'info' => $r['mac_address']];
+            }
+
+            // Dynamic DHCP leases with hostnames
+            foreach (getActiveLeases() as $l) {
+                if ($l['hostname'] === 'Unknown') continue;
+                if (!filter_var($l['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) continue;
+                $key = strtolower($l['hostname']);
+                if (in_array($key, $seen, true)) continue;
+                $seen[]    = $key;
+                $devices[] = ['hostname' => $l['hostname'], 'ip' => $l['ip'], 'source' => 'dynamic', 'info' => $l['expiry']];
+            }
+
+            // ACN discovered devices (seen within 10 minutes)
+            $stale = time() - 600;
+            $rows  = $pdo->query("SELECT hostname, ip_address, description FROM acn_devices WHERE last_seen > $stale ORDER BY hostname")->fetchAll();
+            foreach ($rows as $a) {
+                $key = strtolower($a['hostname']);
+                if (in_array($key, $seen, true)) continue;
+                $seen[]    = $key;
+                $devices[] = ['hostname' => $a['hostname'], 'ip' => $a['ip_address'], 'source' => 'acn', 'info' => $a['description'] ?: ''];
+            }
+
+            usort($devices, fn($a, $b) => strcmp($a['hostname'], $b['hostname']));
+            echo json_encode(['status' => 'success', 'devices' => $devices, 'domain' => $domain]);
+            break;
+
+        case 'ping':
+            $ip = $_GET['ip'] ?? '';
+            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                echo json_encode(['online' => false]);
+                break;
+            }
+            exec('ping -c 1 -W 1 -q ' . escapeshellarg($ip) . ' 2>/dev/null', $out, $ret);
+            echo json_encode(['online' => $ret === 0]);
+            break;
+
         case 'apply_changes':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
 
             // 0. Re-apply stored static interface configs to the host
             $system->reapplyAllInterfaceConfigs($db->getAllInterfaceConfigs());
-
-            // 0b. If DHCPv6 is enabled, ensure the server has the ::1 address of the prefix
-            //     so clients can actually reach the advertised DNS/NTP IPv6 address.
-            $dhcpCfg   = $db->getDhcpSettings();
-            $appSettings = $db->getSettings();
-            if (!empty($dhcpCfg['v6_enabled']) && !empty($appSettings['dhcp_interface'])) {
-                $system->ensureServerIPv6(
-                    $appSettings['dhcp_interface'],
-                    $dhcpCfg['v6_prefix'] ?? 'fd00::/64'
-                );
-            }
 
             // 1. Generate all configuration files from DB state
             $generator->generateAll();
