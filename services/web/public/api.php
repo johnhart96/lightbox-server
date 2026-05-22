@@ -93,18 +93,20 @@ try {
             $pdo = $db->getConnection();
             $records = $pdo->query("SELECT * FROM dns_records ORDER BY hostname ASC")->fetchAll();
             echo json_encode([
-                'status' => 'success',
-                'settings' => $db->getSettings(),
-                'records' => $records
+                'status'     => 'success',
+                'settings'   => $db->getSettings(),
+                'records'    => $records,
+                'interfaces' => $system->getHostNetworkInterfaces()
             ]);
             break;
 
         case 'dns_save':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
-            $db->updateSetting('system_name', $_POST['system_name'] ?? 'Lightbox-Server');
-            $db->updateSetting('domain_name', $_POST['domain_name'] ?? 'lighting.local');
-            $db->updateSetting('primary_dns', $_POST['primary_dns'] ?? '8.8.8.8');
+            $db->updateSetting('system_name',   $_POST['system_name']   ?? 'Lightbox-Server');
+            $db->updateSetting('domain_name',   $_POST['domain_name']   ?? 'lighting.local');
+            $db->updateSetting('primary_dns',   $_POST['primary_dns']   ?? '8.8.8.8');
             $db->updateSetting('secondary_dns', $_POST['secondary_dns'] ?? '');
+            $db->updateSetting('dns_interface', $_POST['dns_interface'] ?? '');
             $db->updateSetting('pending_changes', '1');
             
             echo json_encode(['status' => 'success', 'message' => 'DNS settings saved. Apply changes to activate.']);
@@ -153,13 +155,16 @@ try {
                 'status' => 'success',
                 'settings' => $db->getSettings(),
                 'dhcp_settings' => $db->getDhcpSettings(),
-                'reservations' => $reservations
+                'reservations' => $reservations,
+                'interfaces' => $system->getHostNetworkInterfaces()
             ]);
             break;
 
         case 'dhcp_save':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
             $db->updateSetting('dhcp_interface', $_POST['dhcp_interface'] ?? '');
+            $db->updateSetting('advertise_dns', isset($_POST['advertise_dns']) ? '1' : '0');
+            $db->updateSetting('advertise_ntp', isset($_POST['advertise_ntp']) ? '1' : '0');
             
             $data = [
                 ':v4_enabled' => isset($_POST['v4_enabled']) ? 1 : 0,
@@ -296,9 +301,71 @@ try {
             echo json_encode(['status' => 'success', 'message' => 'Samba share deleted.']);
             break;
 
+        case 'network_get':
+            echo json_encode([
+                'status'     => 'success',
+                'interfaces' => $system->getHostNetworkInterfaces(),
+                'configs'    => $db->getAllInterfaceConfigs(),
+            ]);
+            break;
+
+        case 'network_interface_save':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $iface  = trim($_POST['interface_name'] ?? '');
+            $mode   = $_POST['mode'] ?? 'dhcp';
+            $v4addr = trim($_POST['v4_address'] ?? '');
+            $v4gw   = trim($_POST['v4_gateway']  ?? '');
+            $v6addr = trim($_POST['v6_address'] ?? '');
+            $v6gw   = trim($_POST['v6_gateway']  ?? '');
+
+            if (empty($iface)) throw new Exception('Interface name is required.');
+            if (!in_array($mode, ['dhcp', 'static'], true)) throw new Exception('Invalid mode.');
+
+            if ($mode === 'static') {
+                // Validate any provided addresses are CIDR format
+                foreach (['v4_address' => $v4addr, 'v6_address' => $v6addr] as $field => $val) {
+                    if (!empty($val) && !preg_match('/^[\da-fA-F:.]+\/\d{1,3}$/', $val)) {
+                        throw new Exception("$field must be in CIDR notation (e.g. 192.168.1.10/24).");
+                    }
+                }
+            }
+
+            $cfg = ['mode' => $mode, 'v4_address' => $v4addr, 'v4_gateway' => $v4gw, 'v6_address' => $v6addr, 'v6_gateway' => $v6gw];
+            $result = $system->applyInterfaceConfig($iface, $cfg);
+            if (!$result['ok']) {
+                throw new Exception('Configuration applied with errors: ' . ($result['error'] ?? ''));
+            }
+
+            $db->saveInterfaceConfig($iface, $mode, $v4addr, $v4gw, $v6addr, $v6gw);
+
+            $modeLabel = $mode === 'static' ? 'static' : 'DHCP';
+            echo json_encode(['status' => 'success', 'message' => "{$iface} set to {$modeLabel}."]);
+            break;
+
+        case 'network_connectivity':
+            $interfaces   = $system->getHostNetworkInterfaces();
+            $ifaceNames   = array_column($interfaces, 'name');
+            $connectivity = $system->checkInterfacesConnectivity($ifaceNames);
+            echo json_encode(['status' => 'success', 'connectivity' => $connectivity]);
+            break;
+
         case 'apply_changes':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
-            
+
+            // 0. Re-apply stored static interface configs to the host
+            $system->reapplyAllInterfaceConfigs($db->getAllInterfaceConfigs());
+
+            // 0b. If DHCPv6 is enabled, ensure the server has the ::1 address of the prefix
+            //     so clients can actually reach the advertised DNS/NTP IPv6 address.
+            $dhcpCfg   = $db->getDhcpSettings();
+            $appSettings = $db->getSettings();
+            if (!empty($dhcpCfg['v6_enabled']) && !empty($appSettings['dhcp_interface'])) {
+                $system->ensureServerIPv6(
+                    $appSettings['dhcp_interface'],
+                    $dhcpCfg['v6_prefix'] ?? 'fd00::/64'
+                );
+            }
+
             // 1. Generate all configuration files from DB state
             $generator->generateAll();
             
@@ -306,51 +373,32 @@ try {
             $success = true;
             $errors = [];
 
-            // Reload Bind9
-            if ($system->isContainerRunning('lightbox-bind9')) {
-                if (!$system->reloadService('bind9')) {
-                    $errors[] = 'Failed to reload DNS (Bind9).';
-                    $success = false;
+            $services = [
+                'lightbox-bind9' => 'bind9',
+                'lightbox-dhcp'  => 'dhcp',
+                'lightbox-ntp'   => 'ntp',
+                'lightbox-samba' => 'samba',
+            ];
+
+            foreach ($services as $container => $svc) {
+                if ($system->isContainerRunning($container)) {
+                    $result = $system->reloadService($svc);
+                    if (!$result['ok']) {
+                        $errors[] = $container . ': ' . ($result['output'] ?: 'reload failed');
+                        $success = false;
+                    }
+                } else {
+                    $system->restartContainer($container);
                 }
-            } else {
-                $system->restartContainer('lightbox-bind9');
             }
 
-            // Restart dnsmasq (DHCP)
-            if ($system->isContainerRunning('lightbox-dhcp')) {
-                if (!$system->reloadService('dhcp')) {
-                    $errors[] = 'Failed to restart DHCP (dnsmasq).';
-                    $success = false;
-                }
-            } else {
-                $system->restartContainer('lightbox-dhcp');
-            }
-
-            // Restart chrony (NTP)
-            if ($system->isContainerRunning('lightbox-ntp')) {
-                if (!$system->reloadService('ntp')) {
-                    $errors[] = 'Failed to restart NTP (Chrony).';
-                    $success = false;
-                }
-            } else {
-                $system->restartContainer('lightbox-ntp');
-            }
-
-            // Reload Samba
-            if ($system->isContainerRunning('lightbox-samba')) {
-                if (!$system->reloadService('samba')) {
-                    $errors[] = 'Failed to reload Samba sharing.';
-                    $success = false;
-                }
-            } else {
-                $system->restartContainer('lightbox-samba');
-            }
+            // Configs are always written to disk above — clear pending flag regardless of service reload outcome
+            $db->updateSetting('pending_changes', '0');
 
             if ($success) {
-                $db->updateSetting('pending_changes', '0');
-                echo json_encode(['status' => 'success', 'message' => 'Configurations successfully written and services reloaded.']);
+                echo json_encode(['status' => 'success', 'message' => 'Configurations written and all services reloaded.']);
             } else {
-                echo json_encode(['status' => 'error', 'message' => implode(' ', $errors)]);
+                echo json_encode(['status' => 'warning', 'message' => 'Configs written, but some services failed: ' . implode('; ', $errors)]);
             }
             break;
 

@@ -89,6 +89,25 @@ class Database {
             description TEXT
         )");
 
+        // 6. Network interface addresses (legacy — superseded by interface_config)
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS interface_addresses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            interface_name TEXT NOT NULL,
+            address TEXT NOT NULL,
+            ip_type TEXT CHECK(ip_type IN ('IPv4', 'IPv6')) NOT NULL DEFAULT 'IPv4',
+            UNIQUE(interface_name, address)
+        )");
+
+        // 7. Per-interface IP configuration (DHCP vs static)
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS interface_config (
+            interface_name TEXT PRIMARY KEY,
+            mode           TEXT NOT NULL DEFAULT 'dhcp',
+            v4_address     TEXT NOT NULL DEFAULT '',
+            v4_gateway     TEXT NOT NULL DEFAULT '',
+            v6_address     TEXT NOT NULL DEFAULT '',
+            v6_gateway     TEXT NOT NULL DEFAULT ''
+        )");
+
         // Seed default settings if empty
         $stmt = $this->pdo->query("SELECT COUNT(*) FROM settings");
         if ($stmt->fetchColumn() == 0) {
@@ -98,7 +117,10 @@ class Database {
                 'primary_dns' => '8.8.8.8',
                 'secondary_dns' => '1.1.1.1',
                 'ntp_servers' => '0.pool.ntp.org, 1.pool.ntp.org',
-                'dhcp_interface' => '' // Empty defaults to listening on all interfaces
+                'dhcp_interface' => '', // Empty defaults to listening on all interfaces
+                'dns_interface'  => '', // Empty = auto-detect first available host IP
+                'advertise_dns'  => '1', // Offer Lightbox as DNS server via DHCP
+                'advertise_ntp'  => '0'  // Offer Lightbox as NTP server via DHCP
             ];
             $insert = $this->pdo->prepare("INSERT INTO settings (key, value) VALUES (:key, :value)");
             foreach ($defaultSettings as $key => $value) {
@@ -139,6 +161,42 @@ class Database {
     public function getDhcpSettings() {
         $stmt = $this->pdo->query("SELECT * FROM dhcp_settings WHERE id = 1");
         return $stmt->fetch();
+    }
+
+    public function getInterfaceConfig(string $iface): array {
+        $stmt = $this->pdo->prepare("SELECT * FROM interface_config WHERE interface_name = :iface");
+        $stmt->execute([':iface' => $iface]);
+        return $stmt->fetch() ?: [
+            'interface_name' => $iface,
+            'mode'       => 'dhcp',
+            'v4_address' => '',
+            'v4_gateway' => '',
+            'v6_address' => '',
+            'v6_gateway' => '',
+        ];
+    }
+
+    public function getAllInterfaceConfigs(): array {
+        $stmt = $this->pdo->query("SELECT * FROM interface_config");
+        $rows = $stmt->fetchAll();
+        $out = [];
+        foreach ($rows as $row) {
+            $out[$row['interface_name']] = $row;
+        }
+        return $out;
+    }
+
+    public function saveInterfaceConfig(string $iface, string $mode, string $v4addr, string $v4gw, string $v6addr, string $v6gw): void {
+        $stmt = $this->pdo->prepare(
+            "INSERT OR REPLACE INTO interface_config
+             (interface_name, mode, v4_address, v4_gateway, v6_address, v6_gateway)
+             VALUES (:iface, :mode, :v4a, :v4g, :v6a, :v6g)"
+        );
+        $stmt->execute([
+            ':iface' => $iface, ':mode' => $mode,
+            ':v4a'   => $v4addr, ':v4g'  => $v4gw,
+            ':v6a'   => $v6addr, ':v6g'  => $v6gw,
+        ]);
     }
 
     public function updateDhcpSettings($data) {

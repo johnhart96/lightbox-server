@@ -63,6 +63,11 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                         </a>
                     </li>
                     <li>
+                        <a href="#network" class="nav-link" data-tab="network">
+                            <span class="icon">🔧</span> Network Interfaces
+                        </a>
+                    </li>
+                    <li>
                         <a href="#logs" class="nav-link" data-tab="logs">
                             <span class="icon">📝</span> Service Logs
                         </a>
@@ -251,6 +256,13 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                                     <input type="text" id="domain_name" name="domain_name" required>
                                     <span class="help-text">Suffix for local devices (e.g. <code>lighting.local</code>).</span>
                                 </div>
+                                <div class="form-group">
+                                    <label for="dns_interface">DNS Server Interface</label>
+                                    <select id="dns_interface" name="dns_interface">
+                                        <option value="">Auto-detect (first available host IP)</option>
+                                    </select>
+                                    <span class="help-text">Interface whose IP is used for SOA, NS, and DHCP DNS-server advertisement.</span>
+                                </div>
                                 <div class="form-group-row">
                                     <div class="form-group">
                                         <label for="primary_dns">Primary Upstream DNS</label>
@@ -306,7 +318,22 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                                     </select>
                                     <span class="help-text">Physical network card to serve DHCP leases on.</span>
                                 </div>
-                                
+
+                                <div class="form-group">
+                                    <label>DHCP Advertisements</label>
+                                    <div class="checkbox-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="advertise_dns" name="advertise_dns" value="1">
+                                            Offer Lightbox as DNS server
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="advertise_ntp" name="advertise_ntp" value="1">
+                                            Offer Lightbox as NTP server
+                                        </label>
+                                    </div>
+                                    <span class="help-text">Advertise this server's IP to DHCP clients for DNS and/or NTP.</span>
+                                </div>
+
                                 <hr>
                                 
                                 <div class="config-section">
@@ -468,6 +495,16 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                     </div>
                 </section>
 
+                <!-- Tab: Network Interfaces -->
+                <section id="tab-network" class="tab-panel">
+                    <div class="info-alert" style="margin-bottom: 20px;">
+                        <strong>Note:</strong> Changes are applied immediately to the host system via the DHCP container (host network namespace). Use <strong>Apply Pending Changes</strong> to re-apply these settings after a container restart.
+                    </div>
+                    <div id="interfaces-grid" class="interfaces-grid">
+                        <p class="text-muted text-center">Loading network interfaces...</p>
+                    </div>
+                </section>
+
                 <!-- Tab: Logs -->
                 <section id="tab-logs" class="tab-panel">
                     <div class="card logs-card">
@@ -599,6 +636,75 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline close-modal-btn">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Share</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Network Interface Configure Modal -->
+    <div id="network-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3 id="network-modal-title">Configure Interface</h3>
+            <form id="network-interface-form">
+                <input type="hidden" id="net_iface" name="interface_name">
+
+                <div class="form-group">
+                    <label>Interface</label>
+                    <input type="text" id="net_iface_display" readonly class="input-readonly">
+                </div>
+
+                <div class="form-group">
+                    <label>IP Assignment Mode</label>
+                    <div class="mode-toggle-group">
+                        <label class="mode-option">
+                            <input type="radio" name="mode" value="dhcp" id="mode_dhcp" checked>
+                            <span class="mode-label">DHCP</span>
+                        </label>
+                        <label class="mode-option">
+                            <input type="radio" name="mode" value="static" id="mode_static">
+                            <span class="mode-label">Static</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="net-static-fields">
+                    <hr>
+                    <div class="config-section">
+                        <h4>IPv4 Configuration</h4>
+                        <div class="form-group">
+                            <label for="net_v4_address">IPv4 Address (CIDR)</label>
+                            <input type="text" id="net_v4_address" name="v4_address" placeholder="192.168.1.10/24">
+                            <span class="help-text">e.g. <code>192.168.1.10/24</code></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="net_v4_gateway">Default Gateway</label>
+                            <input type="text" id="net_v4_gateway" name="v4_gateway" placeholder="192.168.1.1">
+                            <span class="help-text">Leave blank to keep existing routes unchanged.</span>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="config-section">
+                        <h4>IPv6 Configuration <span class="optional-label">(optional)</span></h4>
+                        <div class="form-group">
+                            <label for="net_v6_address">IPv6 Address (CIDR)</label>
+                            <input type="text" id="net_v6_address" name="v6_address" placeholder="fd00::1/64">
+                            <span class="help-text">e.g. <code>fd00::1/64</code></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="net_v6_gateway">IPv6 Default Gateway</label>
+                            <input type="text" id="net_v6_gateway" name="v6_gateway" placeholder="fd00::fffe">
+                            <span class="help-text">Leave blank to keep existing routes unchanged.</span>
+                        </div>
+                    </div>
+                    <div class="info-alert" style="margin-top: 16px;">
+                        <strong>Warning:</strong> Changing the IP of the interface you use to reach this dashboard will disrupt your connection momentarily.
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline close-modal-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Apply Configuration</button>
                 </div>
             </form>
         </div>

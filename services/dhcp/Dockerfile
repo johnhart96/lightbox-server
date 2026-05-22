@@ -1,7 +1,7 @@
 FROM alpine:latest
 
 # Install dnsmasq
-RUN apk add --no-cache dnsmasq
+RUN apk add --no-cache dnsmasq iproute2
 
 # Create directories and configuration
 RUN mkdir -p /etc/dnsmasq.d

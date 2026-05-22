@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dhcp: { title: 'DHCP Server', desc: 'Manage IP address assignments and static network reservations' },
         ntp: { title: 'NTP Synchronization', desc: 'Configure system time and network synchronization pools' },
         samba: { title: 'File Sharing', desc: 'Expose storage directories to network clients via SMB' },
+        network: { title: 'Network Interfaces', desc: 'Assign IPv4 and IPv6 addresses to host network interfaces' },
         logs: { title: 'Service Logs', desc: 'Inspect live diagnostic logs for system containers' }
     };
 
@@ -40,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tabId === 'ntp') loadNTPData();
         if (tabId === 'samba') loadSambaData();
         if (tabId === 'logs') loadLogsData();
+        if (tabId === 'network') loadNetworkData();
         if (tabId === 'dashboard') loadLeases();
     }
 
@@ -113,12 +115,14 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/api.php?action=apply_changes', { method: 'POST' })
             .then(res => res.json())
             .then(data => {
+                applyBtn.classList.add('hidden');
+                updateStatus();
                 if (data.status === 'success') {
                     showToast(data.message, 'success');
-                    applyBtn.classList.add('hidden');
-                    updateStatus(); // Refresh status card
-                } else {
+                } else if (data.status === 'warning') {
                     showToast(data.message, 'error');
+                } else {
+                    showToast(data.message || 'Apply failed.', 'error');
                 }
             })
             .catch(err => {
@@ -260,6 +264,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('primary_dns').value = data.settings.primary_dns || '';
                     document.getElementById('secondary_dns').value = data.settings.secondary_dns || '';
 
+                    // Populate DNS interface dropdown with live host interfaces
+                    const dnsIfaceSelect = document.getElementById('dns_interface');
+                    dnsIfaceSelect.innerHTML = '<option value="">Auto-detect (first available host IP)</option>';
+                    (data.interfaces || []).forEach(iface => {
+                        const addrs = [...iface.v4_addresses, ...iface.v6_addresses];
+                        const ipLabel = addrs.length ? addrs.join(', ') : 'No IP assigned';
+                        const opt = document.createElement('option');
+                        opt.value = iface.name;
+                        opt.textContent = `${iface.name} — ${ipLabel}`;
+                        if (data.settings.dns_interface === iface.name) opt.selected = true;
+                        dnsIfaceSelect.appendChild(opt);
+                    });
+
                     // Populate Records Table
                     const tbody = document.querySelector('#dns-records-table tbody');
                     tbody.innerHTML = '';
@@ -370,11 +387,25 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'success') {
-                    // Populate Global DHCP Settings
-                    document.getElementById('dhcp_interface').value = data.settings.dhcp_interface || '';
+                    // Populate DHCP interface dropdown with live host interfaces
+                    const dhcpIfaceSelect = document.getElementById('dhcp_interface');
+                    dhcpIfaceSelect.innerHTML = '<option value="">Listen on all interfaces (Recommended)</option>';
+                    (data.interfaces || []).forEach(iface => {
+                        const addrs = [...iface.v4_addresses, ...iface.v6_addresses];
+                        const ipLabel = addrs.length ? addrs.join(', ') : 'No IP assigned';
+                        const opt = document.createElement('option');
+                        opt.value = iface.name;
+                        opt.textContent = `${iface.name} — ${ipLabel}`;
+                        if (data.settings.dhcp_interface === iface.name) opt.selected = true;
+                        dhcpIfaceSelect.appendChild(opt);
+                    });
                     
+                    // Advertisement checkboxes (from global settings, not dhcp_settings)
+                    document.getElementById('advertise_dns').checked = (data.settings.advertise_dns ?? '1') !== '0';
+                    document.getElementById('advertise_ntp').checked = data.settings.advertise_ntp === '1';
+
                     const settings = data.dhcp_settings;
-                    
+
                     // IPv4 fields
                     const v4check = document.getElementById('v4_enabled');
                     v4check.checked = settings.v4_enabled === 1;
@@ -665,5 +696,165 @@ document.addEventListener('DOMContentLoaded', () => {
         navigator.clipboard.writeText(logsOutput.textContent)
             .then(() => showToast('Logs copied to clipboard.'))
             .catch(() => showToast('Failed to copy logs.', 'error'));
+    });
+
+    // --- TAB: NETWORK INTERFACES ---
+    const networkForm = document.getElementById('network-interface-form');
+    const staticFields = document.getElementById('net-static-fields');
+
+    function toggleNetworkStaticFields() {
+        const isStatic = document.getElementById('mode_static').checked;
+        staticFields.style.display = isStatic ? 'block' : 'none';
+    }
+
+    document.getElementById('mode_dhcp').addEventListener('change', toggleNetworkStaticFields);
+    document.getElementById('mode_static').addEventListener('change', toggleNetworkStaticFields);
+    toggleNetworkStaticFields();
+
+    function loadNetworkData() {
+        fetch('/api.php?action=network_get')
+            .then(res => res.json())
+            .then(data => {
+                const grid = document.getElementById('interfaces-grid');
+                if (data.status !== 'success') {
+                    grid.innerHTML = '<p class="text-muted text-center">Failed to load network interfaces.</p>';
+                    return;
+                }
+                if (!data.interfaces || data.interfaces.length === 0) {
+                    grid.innerHTML = '<p class="text-muted text-center">No network interfaces detected. Ensure the DHCP container is running.</p>';
+                    return;
+                }
+
+                grid.innerHTML = '';
+                const configs = data.configs || {};
+
+                data.interfaces.forEach(iface => {
+                    const cfg         = configs[iface.name] || { mode: 'dhcp' };
+                    const isStatic    = cfg.mode === 'static';
+                    const statusClass = iface.status === 'up' ? 'active' : 'inactive';
+                    const modeClass   = isStatic ? 'pending' : 'active';
+                    const modeLabel   = isStatic ? 'Static' : 'DHCP';
+
+                    // Address rows: show configured static addresses, then any live addresses
+                    let addrHtml = '';
+                    if (isStatic) {
+                        if (cfg.v4_address) {
+                            addrHtml += `<div class="addr-row">
+                                <code class="addr-cidr">${cfg.v4_address}</code>
+                                <span class="badge active">IPv4</span>
+                                ${cfg.v4_gateway ? `<span class="addr-gw-label">gw ${cfg.v4_gateway}</span>` : ''}
+                            </div>`;
+                        }
+                        if (cfg.v6_address) {
+                            addrHtml += `<div class="addr-row">
+                                <code class="addr-cidr">${cfg.v6_address}</code>
+                                <span class="badge pending">IPv6</span>
+                                ${cfg.v6_gateway ? `<span class="addr-gw-label">gw ${cfg.v6_gateway}</span>` : ''}
+                            </div>`;
+                        }
+                        if (!cfg.v4_address && !cfg.v6_address) {
+                            addrHtml = '<p class="text-muted no-addr-msg">Static mode — no address configured yet.</p>';
+                        }
+                    } else {
+                        // DHCP: show whatever the system currently has
+                        [...iface.v4_addresses, ...iface.v6_addresses].forEach(addr => {
+                            const isV6 = addr.includes(':');
+                            addrHtml += `<div class="addr-row addr-unmanaged">
+                                <code class="addr-cidr">${addr}</code>
+                                <span class="badge ${isV6 ? 'pending' : 'active'}">${isV6 ? 'IPv6' : 'IPv4'}</span>
+                                <span class="addr-unmanaged-label">DHCP assigned</span>
+                            </div>`;
+                        });
+                        if (!iface.v4_addresses.length && !iface.v6_addresses.length) {
+                            addrHtml = '<p class="text-muted no-addr-msg">No address assigned by DHCP yet.</p>';
+                        }
+                    }
+
+                    const card = document.createElement('div');
+                    card.className = 'card interface-card';
+                    card.innerHTML = `
+                        <div class="interface-header">
+                            <span class="status-pulse grey net-conn-dot" data-iface="${iface.name}" title="Checking internet connectivity..."></span>
+                            <span class="interface-name">${iface.name}</span>
+                            <span class="badge ${statusClass}">${iface.status.toUpperCase()}</span>
+                            <span class="badge ${modeClass} mode-badge">${modeLabel}</span>
+                            ${iface.mac ? `<code class="mac-addr">${iface.mac}</code>` : ''}
+                            <button class="btn btn-secondary btn-sm configure-iface-btn"
+                                    data-iface="${iface.name}"
+                                    data-mode="${cfg.mode || 'dhcp'}"
+                                    data-v4="${cfg.v4_address || ''}"
+                                    data-v4gw="${cfg.v4_gateway || ''}"
+                                    data-v6="${cfg.v6_address || ''}"
+                                    data-v6gw="${cfg.v6_gateway || ''}">Configure</button>
+                        </div>
+                        <div class="addresses-list">${addrHtml}</div>`;
+
+                    grid.appendChild(card);
+                });
+
+                grid.querySelectorAll('.configure-iface-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.getElementById('network-modal-title').textContent = `Configure ${btn.dataset.iface}`;
+                        document.getElementById('net_iface').value         = btn.dataset.iface;
+                        document.getElementById('net_iface_display').value = btn.dataset.iface;
+                        document.getElementById('net_v4_address').value    = btn.dataset.v4;
+                        document.getElementById('net_v4_gateway').value    = btn.dataset.v4gw;
+                        document.getElementById('net_v6_address').value    = btn.dataset.v6;
+                        document.getElementById('net_v6_gateway').value    = btn.dataset.v6gw;
+
+                        const isStatic = btn.dataset.mode === 'static';
+                        document.getElementById('mode_static').checked = isStatic;
+                        document.getElementById('mode_dhcp').checked   = !isStatic;
+                        toggleNetworkStaticFields();
+
+                        openModal('network-modal');
+                    });
+                });
+
+                // Fetch connectivity asynchronously — pings take a moment
+                fetch('/api.php?action=network_connectivity')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status !== 'success') return;
+                        grid.querySelectorAll('.net-conn-dot').forEach(dot => {
+                            const connected = data.connectivity[dot.dataset.iface];
+                            dot.classList.remove('grey');
+                            if (connected) {
+                                dot.classList.add('green');
+                                dot.title = 'Internet: Connected';
+                            } else {
+                                dot.classList.add('grey');
+                                dot.title = 'Internet: No connection';
+                            }
+                        });
+                    })
+                    .catch(() => {
+                        grid.querySelectorAll('.net-conn-dot').forEach(dot => {
+                            dot.title = 'Connectivity check failed';
+                        });
+                    });
+            })
+            .catch(err => {
+                document.getElementById('interfaces-grid').innerHTML =
+                    '<p class="text-muted text-center">Error connecting to API.</p>';
+                console.error(err);
+            });
+    }
+
+    networkForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const formData = new FormData(networkForm);
+        fetch('/api.php?action=network_interface_save', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showToast(data.message);
+                    closeModal();
+                    loadNetworkData();
+                } else {
+                    showToast(data.message, 'error');
+                }
+            })
+            .catch(() => showToast('Failed to apply configuration: server error.', 'error'));
     });
 });

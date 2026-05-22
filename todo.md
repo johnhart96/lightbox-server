@@ -1,10 +1,7 @@
 # Todo
 
-## Bugs
-* Service status on dashboard does not work.
-* System uptime does not work on the dashboard
-* Docker IP is populated with the docker IP and not the host IP.
-* Service logs do not work.
+## Known Bugs
+
 
 ## Features
 * DHCP leases should automaticlly be added as DNS entries
@@ -17,3 +14,5 @@
 * Add a certificate authority.
 * Reverse DNS
 * Devices tab. See all devices (both DHCP added and mamually added) and see if they are online.
+* Syslog
+* Wifi Support

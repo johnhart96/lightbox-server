@@ -18,29 +18,51 @@ class ConfigGenerator {
     }
 
     /**
-     * Helper to get the primary IP of the host
+     * Get the host IP(s) to use in DNS zone files and DHCP advertisements.
+     * Reads from the dhcp container (network_mode: host) so we see real host
+     * interfaces rather than the web container's bridge IP.
+     * If dns_interface is set, uses that interface; otherwise picks the first
+     * non-loopback interface that has an address.
      */
-    private function getHostIPs() {
-        $ips = ['v4' => '127.0.0.1', 'v6' => '::1'];
-        
-        // Execute hostname -I to get host IPs (since we are in network_mode host or have container IPs)
-        $output = shell_exec("hostname -I");
-        if ($output) {
-            $parts = explode(' ', trim($output));
-            foreach ($parts as $part) {
-                $part = trim($part);
-                if (filter_var($part, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-                    if ($ips['v4'] === '127.0.0.1') {
-                        $ips['v4'] = $part;
-                    }
-                } elseif (filter_var($part, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-                    // Avoid link-local IPv6 addresses (fe80::) for primary setting if possible
-                    if ($ips['v6'] === '::1' && strpos($part, 'fe80::') !== 0) {
-                        $ips['v6'] = $part;
-                    }
+    private function getHostIPs(): array {
+        $settings  = $this->db->getSettings();
+        $iface     = trim($settings['dns_interface'] ?? '');
+        $ips       = ['v4' => '127.0.0.1', 'v6' => '::1'];
+
+        if (!empty($iface)) {
+            // Specific interface selected — read its current addresses
+            $out4 = shell_exec("docker exec lightbox-dhcp ip -4 addr show dev " . escapeshellarg($iface) . " 2>/dev/null") ?? '';
+            if (preg_match('/inet\s+([\d.]+)\//', $out4, $m)) {
+                $ips['v4'] = $m[1];
+            }
+            $out6 = shell_exec("docker exec lightbox-dhcp ip -6 addr show dev " . escapeshellarg($iface) . " 2>/dev/null") ?? '';
+            if (preg_match('/inet6\s+([0-9a-f:]+)\/\d+\s+scope global/i', $out6, $m)) {
+                $ips['v6'] = $m[1];
+            }
+        } else {
+            // Auto-detect: parse all host interfaces and pick the first non-loopback IP
+            $out = shell_exec("docker exec lightbox-dhcp ip addr 2>/dev/null") ?? '';
+            $skip = ['lo', 'docker', 'veth', 'br-'];
+            $currentIface = '';
+            foreach (explode("\n", $out) as $line) {
+                if (preg_match('/^\d+:\s+(\S+):/', $line, $m)) {
+                    $currentIface = $m[1];
+                }
+                $isSkipped = $currentIface === 'lo';
+                foreach (['docker', 'veth', 'br-'] as $p) {
+                    if (strpos($currentIface, $p) === 0) { $isSkipped = true; break; }
+                }
+                if ($isSkipped) continue;
+
+                if ($ips['v4'] === '127.0.0.1' && preg_match('/inet\s+([\d.]+)\//', $line, $m)) {
+                    $ips['v4'] = $m[1];
+                }
+                if ($ips['v6'] === '::1' && preg_match('/inet6\s+([0-9a-f:]+)\/\d+\s+scope global/i', $line, $m)) {
+                    $ips['v6'] = $m[1];
                 }
             }
         }
+
         return $ips;
     }
 
@@ -135,6 +157,8 @@ class ConfigGenerator {
         $settings = $this->db->getSettings();
         $dhcpSettings = $this->db->getDhcpSettings();
         $interface = $settings['dhcp_interface'] ?? '';
+        $advertiseDns = ($settings['advertise_dns'] ?? '1') === '1';
+        $advertiseNtp = ($settings['advertise_ntp'] ?? '0') === '1';
         $hostIPs = $this->getHostIPs();
 
         $content = "# dnsmasq DHCP configuration\n";
@@ -147,16 +171,20 @@ class ConfigGenerator {
         // DHCPv4 Config
         if ($dhcpSettings['v4_enabled']) {
             $content .= "# DHCPv4 settings\n";
-            $content .= sprintf("dhcp-range=%s,%s,%s,%s\n", 
+            $content .= sprintf("dhcp-range=%s,%s,%s,%s\n",
                 $dhcpSettings['v4_range_start'],
                 $dhcpSettings['v4_range_end'],
                 $dhcpSettings['v4_netmask'],
                 $dhcpSettings['v4_lease_time']
             );
             $content .= "dhcp-option=option:router," . $dhcpSettings['v4_gateway'] . "\n";
-            
-            // Advertise this host (running Bind9) as the DNS server
-            $content .= "dhcp-option=option:dns-server," . $hostIPs['v4'] . "\n\n";
+            if ($advertiseDns) {
+                $content .= "dhcp-option=option:dns-server," . $hostIPs['v4'] . "\n";
+            }
+            if ($advertiseNtp) {
+                $content .= "dhcp-option=option:ntp-server," . $hostIPs['v4'] . "\n";
+            }
+            $content .= "\n";
         }
 
         // DHCPv6 Config
@@ -174,13 +202,22 @@ class ConfigGenerator {
                 $prefixLen,
                 $dhcpSettings['v6_lease_time']
             );
-            
-            // Enable router advertisement
             $content .= "enable-ra\n";
-            
-            // Advertise host IPv6 as DNS server (fallback to link-local address or ::1 if empty)
-            $dnsV6 = ($hostIPs['v6'] !== '::1') ? $hostIPs['v6'] : '::';
-            $content .= "dhcp-option=option6:dns-server,[" . $dnsV6 . "]\n\n";
+
+            // Prefer a detected global IPv6; fall back to ::1 of the DHCPv6 prefix
+            if ($hostIPs['v6'] !== '::1') {
+                $serverV6 = $hostIPs['v6'];
+            } else {
+                $networkAddr = explode('/', $dhcpSettings['v6_prefix'] ?? 'fd00::/64')[0];
+                $serverV6 = (substr($networkAddr, -2) === '::') ? $networkAddr . '1' : rtrim($networkAddr, ':') . '::1';
+            }
+            if ($advertiseDns) {
+                $content .= "dhcp-option=option6:dns-server,[" . $serverV6 . "]\n";
+            }
+            if ($advertiseNtp) {
+                $content .= "dhcp-option=option6:sntp-server,[" . $serverV6 . "]\n";
+            }
+            $content .= "\n";
         }
 
         // Static IP Reservations

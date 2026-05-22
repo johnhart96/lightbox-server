@@ -117,22 +117,22 @@ class SystemManager {
     public function getNetworkInterfaces() {
         $interfaces = [];
         $paths = glob('/sys/class/net/*') ?: [];
-        
+
         foreach ($paths as $path) {
             $name = basename($path);
-            
+
             // Skip loopback interface
             if ($name === 'lo' || strpos($name, 'docker') === 0 || strpos($name, 'veth') === 0 || strpos($name, 'br-') === 0) {
                 continue;
             }
-            
+
             // Read operational status (up/down)
             $operstate = 'unknown';
             $stateFile = $path . '/operstate';
             if (file_exists($stateFile)) {
                 $operstate = trim(file_get_contents($stateFile));
             }
-            
+
             // Read IP address if available
             $ip = '';
             $output = shell_exec("ip -4 addr show dev " . escapeshellarg($name));
@@ -148,6 +148,174 @@ class SystemManager {
             ];
         }
         return $interfaces;
+    }
+
+    /**
+     * Get host network interfaces with full address info via the dhcp container.
+     * The dhcp container runs with network_mode: host and NET_ADMIN, so it sees
+     * the real host interfaces. iproute2 must be installed in that container.
+     */
+    public function getHostNetworkInterfaces(): array {
+        $output = shell_exec("docker exec lightbox-dhcp ip addr 2>/dev/null");
+        if (empty(trim($output ?? ''))) return [];
+        return $this->parseIpAddrOutput($output);
+    }
+
+    private function parseIpAddrOutput(string $output): array {
+        $interfaces  = [];
+        $current     = null;
+        $skip        = ['lo'];
+        $skipPrefixes = ['docker', 'veth', 'br-'];
+
+        foreach (explode("\n", $output) as $line) {
+            // Interface header: "2: eth0: <flags> state UP ..."
+            if (preg_match('/^\d+:\s+([^:@\s]+)/', $line, $m)) {
+                if ($current !== null) {
+                    $interfaces[] = $current;
+                }
+                $name = $m[1];
+
+                if (in_array($name, $skip, true)) { $current = null; continue; }
+                foreach ($skipPrefixes as $prefix) {
+                    if (strpos($name, $prefix) === 0) { $current = null; continue 2; }
+                }
+
+                $status = 'unknown';
+                if (strpos($line, 'state UP') !== false)   $status = 'up';
+                elseif (strpos($line, 'state DOWN') !== false) $status = 'down';
+
+                $current = ['name' => $name, 'status' => $status, 'mac' => '', 'v4_addresses' => [], 'v6_addresses' => []];
+            } elseif ($current !== null) {
+                if (preg_match('/^\s+link\/ether\s+([\da-f:]+)/i', $line, $m)) {
+                    $current['mac'] = $m[1];
+                } elseif (preg_match('/^\s+inet\s+([\d.]+\/\d+)/', $line, $m)) {
+                    $current['v4_addresses'][] = $m[1];
+                } elseif (preg_match('/^\s+inet6\s+([0-9a-f:]+\/\d+)/i', $line, $m)) {
+                    if (strpos(strtolower($m[1]), 'fe80') !== 0) {
+                        $current['v6_addresses'][] = $m[1];
+                    }
+                }
+            }
+        }
+
+        if ($current !== null) {
+            $interfaces[] = $current;
+        }
+
+        return $interfaces;
+    }
+
+    /**
+     * Apply a stored interface config (static or dhcp) to the host via the dhcp container.
+     * For static: flushes the interface then sets addresses and routes.
+     * For dhcp:   removes any static addresses we previously set (host DHCP client handles the rest).
+     */
+    public function applyInterfaceConfig(string $iface, array $cfg): array {
+        $errors = [];
+        $mode   = $cfg['mode'] ?? 'dhcp';
+        $dev    = escapeshellarg($iface);
+
+        if ($mode === 'static') {
+            // Remove all current addresses so we start clean
+            shell_exec("docker exec lightbox-dhcp ip addr flush dev $dev 2>/dev/null");
+
+            $v4 = trim($cfg['v4_address'] ?? '');
+            if (!empty($v4)) {
+                $out = trim(shell_exec(sprintf(
+                    "docker exec lightbox-dhcp ip addr add %s dev $dev 2>&1",
+                    escapeshellarg($v4)
+                )) ?? '');
+                if (!empty($out)) $errors[] = "IPv4 addr: $out";
+            }
+
+            $gw4 = trim($cfg['v4_gateway'] ?? '');
+            if (!empty($gw4)) {
+                // replace is atomic: creates if missing, updates if present
+                shell_exec("docker exec lightbox-dhcp ip route del default 2>/dev/null");
+                $out = trim(shell_exec(sprintf(
+                    "docker exec lightbox-dhcp ip route add default via %s dev $dev 2>&1",
+                    escapeshellarg($gw4)
+                )) ?? '');
+                if (!empty($out) && strpos($out, 'File exists') === false) $errors[] = "IPv4 gw: $out";
+            }
+
+            $v6 = trim($cfg['v6_address'] ?? '');
+            if (!empty($v6)) {
+                $out = trim(shell_exec(sprintf(
+                    "docker exec lightbox-dhcp ip -6 addr add %s dev $dev 2>&1",
+                    escapeshellarg($v6)
+                )) ?? '');
+                if (!empty($out)) $errors[] = "IPv6 addr: $out";
+            }
+
+            $gw6 = trim($cfg['v6_gateway'] ?? '');
+            if (!empty($gw6)) {
+                shell_exec("docker exec lightbox-dhcp ip -6 route del default 2>/dev/null");
+                $out = trim(shell_exec(sprintf(
+                    "docker exec lightbox-dhcp ip -6 route add default via %s dev $dev 2>&1",
+                    escapeshellarg($gw6)
+                )) ?? '');
+                if (!empty($out) && strpos($out, 'File exists') === false) $errors[] = "IPv6 gw: $out";
+            }
+        }
+        // DHCP mode: we do not touch the interface; the host DHCP client manages it.
+
+        return empty($errors)
+            ? ['ok' => true]
+            : ['ok' => false, 'error' => implode('; ', $errors)];
+    }
+
+    /**
+     * Check internet connectivity per interface by looking for a default route
+     * assigned specifically to that interface. Returns a map of name => bool.
+     */
+    public function checkInterfacesConnectivity(array $ifaceNames): array {
+        $results = [];
+        foreach ($ifaceNames as $name) {
+            // "ip route show dev <iface>" lists routes assigned to that interface.
+            // If a "default" route appears, it has a gateway to the wider internet.
+            $cmd    = sprintf("docker exec lightbox-dhcp ip route show dev %s 2>/dev/null", escapeshellarg($name));
+            $output = shell_exec($cmd) ?? '';
+            $results[$name] = strpos($output, 'default') !== false;
+        }
+        return $results;
+    }
+
+    /**
+     * Re-apply all stored static interface configs (called from apply_changes).
+     * DHCP interfaces are skipped — the host DHCP client handles them.
+     */
+    public function reapplyAllInterfaceConfigs(array $configs): void {
+        foreach ($configs as $cfg) {
+            if (($cfg['mode'] ?? 'dhcp') === 'static') {
+                $this->applyInterfaceConfig($cfg['interface_name'], $cfg);
+            }
+        }
+    }
+
+    /**
+     * Ensure the server has the ::1 address of the DHCPv6 prefix on the given interface.
+     * Called during apply_changes so clients can actually reach the advertised IPv6 DNS/NTP address.
+     */
+    public function ensureServerIPv6(string $iface, string $v6Prefix): void {
+        $parts      = explode('/', $v6Prefix);
+        $networkAddr = $parts[0];
+        $prefixLen   = $parts[1] ?? '64';
+        $serverV6    = (substr($networkAddr, -2) === '::') ? $networkAddr . '1' : rtrim($networkAddr, ':') . '::1';
+        $cidr        = $serverV6 . '/' . $prefixLen;
+
+        $existing = shell_exec(sprintf(
+            "docker exec lightbox-dhcp ip -6 addr show dev %s 2>/dev/null",
+            escapeshellarg($iface)
+        )) ?? '';
+
+        if (strpos($existing, $serverV6) === false) {
+            shell_exec(sprintf(
+                "docker exec lightbox-dhcp ip -6 addr add %s dev %s 2>/dev/null",
+                escapeshellarg($cidr),
+                escapeshellarg($iface)
+            ));
+        }
     }
 
     /**
@@ -172,31 +340,36 @@ class SystemManager {
      */
     public function restartContainer($containerName) {
         $command = sprintf("docker restart %s 2>&1", escapeshellarg($containerName));
-        $output = shell_exec($command);
-        return trim($output) === $containerName;
+        $output = shell_exec($command) ?? '';
+        return strpos($output, $containerName) !== false;
     }
 
     /**
      * Reload service config inside container if supported, else restart container
      */
+    /**
+     * Reload/restart a service. Returns ['ok' => bool, 'output' => string].
+     */
     public function reloadService($serviceName) {
         switch ($serviceName) {
             case 'bind9':
-                $output = shell_exec("docker exec lightbox-bind9 rndc reload 2>&1");
-                return strpos($output, 'server reload successful') !== false || empty(trim($output));
-            
+                exec("docker exec lightbox-bind9 rndc reload 2>&1", $out, $exitCode);
+                return ['ok' => $exitCode === 0, 'output' => implode("\n", $out)];
+
             case 'samba':
-                $output = shell_exec("docker exec lightbox-samba smbcontrol all reload-config 2>&1");
-                return empty(trim($output));
+                $ok = $this->restartContainer('lightbox-samba');
+                return ['ok' => $ok, 'output' => $ok ? '' : 'docker restart returned unexpected output'];
 
             case 'dhcp':
-                return $this->restartContainer('lightbox-dhcp');
+                $ok = $this->restartContainer('lightbox-dhcp');
+                return ['ok' => $ok, 'output' => $ok ? '' : 'docker restart returned unexpected output'];
 
             case 'ntp':
-                return $this->restartContainer('lightbox-ntp');
+                $ok = $this->restartContainer('lightbox-ntp');
+                return ['ok' => $ok, 'output' => $ok ? '' : 'docker restart returned unexpected output'];
 
             default:
-                return false;
+                return ['ok' => false, 'output' => 'unknown service'];
         }
     }
 
