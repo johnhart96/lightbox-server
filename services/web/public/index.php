@@ -1,14 +1,21 @@
 <?php
 require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/SystemManager.php';
+require_once __DIR__ . '/../src/UserManager.php';
+require_once __DIR__ . '/../src/Auth.php';
 
 use App\Database;
 use App\SystemManager;
+use App\UserManager;
+use App\Auth;
 
-// Initialize Database to ensure SQLite is created and seeded
 $db = Database::getInstance();
+$userManager = new UserManager($db);
+Auth::requireLogin($userManager);
+
 $settings = $db->getSettings();
 $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
+$currentUser = Auth::currentUser();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -77,6 +84,11 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                             <span class="icon">📝</span> Service Logs
                         </a>
                     </li>
+                    <li>
+                        <a href="#users" class="nav-link" data-tab="users">
+                            <span class="icon">👤</span> User Accounts
+                        </a>
+                    </li>
                 </ul>
             </nav>
 
@@ -88,6 +100,14 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                 <div class="uptime-display">
                     Uptime: <span id="sidebar-uptime">--</span>
                 </div>
+                <?php if ($currentUser): ?>
+                <div class="sidebar-user">
+                    <span class="sidebar-user-name">
+                        <?= htmlspecialchars($currentUser['display_name'] ?: $currentUser['username']) ?>
+                    </span>
+                    <button id="logout-btn" class="btn-logout" title="Sign out">Sign out</button>
+                </div>
+                <?php endif; ?>
             </div>
         </aside>
 
@@ -113,6 +133,16 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
             <div class="content-body">
                 <!-- Tab: Dashboard -->
                 <section id="tab-dashboard" class="tab-panel active">
+                    <?php if (!$userManager->hasUsers()): ?>
+                    <div class="alert-danger">
+                        <div class="alert-danger-icon">⚠</div>
+                        <div class="alert-danger-body">
+                            <strong>No user accounts configured — authentication is disabled.</strong>
+                            Anyone on the network can access and modify this system.
+                            <a href="#users" class="alert-danger-link" data-tab="users">Create a user account</a> to enable login protection.
+                        </div>
+                    </div>
+                    <?php endif; ?>
                     <div class="stats-grid">
                         <div class="stat-card">
                             <div class="stat-icon purple">🔌</div>
@@ -594,6 +624,35 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                         </div>
                     </div>
                 </section>
+
+                <!-- Tab: User Accounts -->
+                <section id="tab-users" class="tab-panel">
+                    <div class="card table-card">
+                        <div class="card-header-btn">
+                            <h3>Local User Accounts</h3>
+                            <button id="add-user-btn" class="btn btn-secondary btn-sm">+ Add User</button>
+                        </div>
+                        <p class="desc-text">Linux accounts on the Samba container. Users with Samba enabled can authenticate to SMB file shares with a password.</p>
+                        <div class="table-wrapper">
+                            <table id="users-table">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Display Name</th>
+                                        <th>Samba Access</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="5" class="text-center">Loading user accounts...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
             </div>
         </main>
     </div>
@@ -770,6 +829,44 @@ $systemName = htmlspecialchars($settings['system_name'] ?? 'Lightbox-Server');
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline close-modal-btn">Cancel</button>
                     <button type="submit" class="btn btn-primary">Apply Configuration</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- User Add/Edit Modal -->
+    <div id="user-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3 id="user-modal-title">Add User Account</h3>
+            <form id="user-form">
+                <input type="hidden" id="user_id" name="id">
+                <div class="form-group-row">
+                    <div class="form-group">
+                        <label for="user_username">Username</label>
+                        <input type="text" id="user_username" name="username" required placeholder="johndoe"
+                               pattern="[a-z][a-z0-9_\-]{0,31}" autocomplete="off">
+                        <span class="help-text">Lowercase letters, digits, hyphens, underscores. Max 32 chars.</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="user_display_name">Display Name</label>
+                        <input type="text" id="user_display_name" name="display_name" placeholder="John Doe">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="user_password">Password <span id="user-pwd-hint" class="optional-label">(leave blank to keep existing)</span></label>
+                    <input type="password" id="user_password" name="password" autocomplete="new-password" placeholder="Set a password">
+                    <span class="help-text">Used for Samba SMB authentication.</span>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="user_samba_enabled" name="samba_enabled" value="1" checked>
+                        Enable Samba (SMB) access for this user
+                    </label>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline close-modal-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save User</button>
                 </div>
             </form>
         </div>

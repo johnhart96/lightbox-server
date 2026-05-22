@@ -6,5 +6,7 @@ RUN apk add --no-cache samba
 # Create shares directory
 RUN mkdir -p /shares
 
-# Start smbd in the foreground, logging to stdout
-ENTRYPOINT ["smbd", "--foreground", "--no-process-group", "--debug-stdout", "--configfile=/etc/samba/smb.conf"]
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

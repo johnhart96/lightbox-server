@@ -5,14 +5,21 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/ConfigGenerator.php';
 require_once __DIR__ . '/../src/SystemManager.php';
+require_once __DIR__ . '/../src/UserManager.php';
+require_once __DIR__ . '/../src/Auth.php';
 
 use App\Database;
 use App\ConfigGenerator;
 use App\SystemManager;
+use App\UserManager;
+use App\Auth;
 
 $db = Database::getInstance();
 $system = new SystemManager();
 $generator = new ConfigGenerator($db);
+$users = new UserManager($db);
+
+Auth::requireLoginApi($users);
 
 $action = $_GET['action'] ?? '';
 
@@ -552,6 +559,41 @@ try {
                 'status' => 'success',
                 'logs' => $logs
             ]);
+            break;
+
+        case 'logout':
+            Auth::logout();
+            echo json_encode(['status' => 'success']);
+            break;
+
+        case 'users_get':
+            echo json_encode([
+                'status' => 'success',
+                'users'  => $users->listUsers()
+            ]);
+            break;
+
+        case 'user_save':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $users->saveUser($_POST);
+            echo json_encode(['status' => 'success', 'message' => 'User saved.']);
+            break;
+
+        case 'user_delete':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $id = trim($_POST['id'] ?? '');
+            if (empty($id)) throw new Exception('User ID required.');
+            $users->deleteUser($id);
+            echo json_encode(['status' => 'success', 'message' => 'User deleted.']);
+            break;
+
+        case 'user_password':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $id  = trim($_POST['id'] ?? '');
+            $pwd = $_POST['password'] ?? '';
+            if (empty($id)) throw new Exception('User ID required.');
+            $users->changePassword($id, $pwd);
+            echo json_encode(['status' => 'success', 'message' => 'Password updated.']);
             break;
 
         default:

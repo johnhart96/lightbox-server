@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tabId === 'network') loadNetworkData();
         if (tabId === 'devices') loadDevices();
         if (tabId === 'dashboard') loadLeases();
+        if (tabId === 'users') loadUsersData();
     }
 
     navLinks.forEach(link => {
@@ -54,6 +55,18 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.hash = tabId;
             switchTab(tabId);
         });
+    });
+
+    // Allow any element with data-tab to act as a tab link (e.g. dashboard alerts)
+    document.addEventListener('click', (e) => {
+        const el = e.target.closest('[data-tab]:not(.nav-link)');
+        if (!el) return;
+        e.preventDefault();
+        const tabId = el.dataset.tab;
+        if (tabMeta[tabId]) {
+            window.location.hash = tabId;
+            switchTab(tabId);
+        }
     });
 
     // Check hash on load
@@ -107,6 +120,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 350);
         }, duration);
     }
+
+    // Logout
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            fetch('/api.php?action=logout', { method: 'POST' })
+                .finally(() => { window.location.href = '/login.php'; });
+        });
+    }
+
+    // Global 401 handler — redirect to login if session expires
+    const _origFetch = window.fetch;
+    window.fetch = function(...args) {
+        return _origFetch(...args).then(res => {
+            if (res.status === 401) {
+                window.location.href = '/login.php';
+            }
+            return res;
+        });
+    };
 
     // Apply Changes Button
     const applyBtn = document.getElementById('apply-btn');
@@ -976,4 +1009,102 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(() => showToast('Failed to apply configuration: server error.', 'error'));
     });
+
+    // --- TAB: USER ACCOUNTS ---
+    const userForm = document.getElementById('user-form');
+
+    // Wire tab meta
+    tabMeta['users'] = { title: 'User Accounts', desc: 'Manage Linux and Samba user accounts for file share access' };
+
+    function loadUsersData() {
+        fetch('/api.php?action=users_get')
+            .then(res => res.json())
+            .then(data => {
+                if (data.status !== 'success') return;
+                const tbody = document.querySelector('#users-table tbody');
+                if (!data.users.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No user accounts configured.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.users.map(u => `
+                    <tr>
+                        <td><code>${u.username}</code></td>
+                        <td>${u.display_name || '<span class="text-muted">—</span>'}</td>
+                        <td><span class="badge ${u.samba_enabled == 1 ? 'active' : 'inactive'}">${u.samba_enabled == 1 ? 'Enabled' : 'Disabled'}</span></td>
+                        <td>${u.created_at ? u.created_at.split(' ')[0] : '—'}</td>
+                        <td>
+                            <button class="btn-edit-sm user-edit-btn"
+                                data-id="${u.id}"
+                                data-username="${u.username}"
+                                data-display="${u.display_name || ''}"
+                                data-samba="${u.samba_enabled}">Edit</button>
+                            <button class="btn-danger-sm user-delete-btn" data-id="${u.id}" data-username="${u.username}">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+
+                document.querySelectorAll('.user-edit-btn').forEach(btn => {
+                    btn.addEventListener('click', () => openUserModal(btn.dataset));
+                });
+                document.querySelectorAll('.user-delete-btn').forEach(btn => {
+                    btn.addEventListener('click', () => deleteUser(btn.dataset.id, btn.dataset.username));
+                });
+            })
+            .catch(() => {
+                document.querySelector('#users-table tbody').innerHTML =
+                    '<tr><td colspan="5" class="text-center text-muted">Error loading user accounts.</td></tr>';
+            });
+    }
+
+    function openUserModal(data = {}) {
+        document.getElementById('user-modal-title').textContent = data.id ? 'Edit User Account' : 'Add User Account';
+        document.getElementById('user_id').value          = data.id       || '';
+        document.getElementById('user_username').value    = data.username || '';
+        document.getElementById('user_display_name').value = data.display || '';
+        document.getElementById('user_password').value    = '';
+        document.getElementById('user_samba_enabled').checked = data.samba !== '0';
+        document.getElementById('user-pwd-hint').style.display = data.id ? '' : 'none';
+        document.getElementById('user_username').readOnly = !!data.id;
+        openModal('user-modal');
+    }
+
+    document.getElementById('add-user-btn').addEventListener('click', () => openUserModal());
+
+    userForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const btn = userForm.querySelector('[type="submit"]');
+        btn.disabled = true;
+        const formData = new FormData(userForm);
+        fetch('/api.php?action=user_save', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showToast(data.message);
+                    closeModal();
+                    loadUsersData();
+                } else {
+                    showToast(data.message, 'error');
+                }
+            })
+            .catch(() => showToast('Server error saving user.', 'error'))
+            .finally(() => { btn.disabled = false; });
+    });
+
+    function deleteUser(id, username) {
+        if (!confirm(`Delete user "${username}"? This will remove their Linux and Samba accounts.`)) return;
+        const formData = new FormData();
+        formData.append('id', id);
+        fetch('/api.php?action=user_delete', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showToast(data.message);
+                    loadUsersData();
+                } else {
+                    showToast(data.message, 'error');
+                }
+            })
+            .catch(() => showToast('Server error deleting user.', 'error'));
+    }
+
 });

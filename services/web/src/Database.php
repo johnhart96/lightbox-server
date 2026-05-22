@@ -117,6 +117,22 @@ class Database {
             last_seen   INTEGER NOT NULL
         )");
 
+        // 9. Local user accounts (Linux + Samba)
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS users (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT UNIQUE NOT NULL,
+            display_name  TEXT NOT NULL DEFAULT '',
+            samba_enabled INTEGER NOT NULL DEFAULT 1,
+            password_hash TEXT,
+            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        )");
+        // Migrate existing users table — add password_hash if absent
+        try {
+            $this->pdo->exec("ALTER TABLE users ADD COLUMN password_hash TEXT");
+        } catch (\PDOException $e) {
+            // Column already exists
+        }
+
         // Seed default settings if empty
         $stmt = $this->pdo->query("SELECT COUNT(*) FROM settings");
         if ($stmt->fetchColumn() == 0) {
