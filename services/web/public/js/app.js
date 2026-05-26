@@ -721,7 +721,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('add-share-btn').addEventListener('click', () => {
-        document.getElementById('samba-modal-title').textContent = 'Add Samba Share';
+        document.getElementById('samba-modal-title').textContent = 'Add File Share';
         sambaForm.reset();
         document.getElementById('samba_id').value = '';
         openModal('samba-modal');
