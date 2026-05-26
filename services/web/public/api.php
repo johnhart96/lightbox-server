@@ -461,6 +461,39 @@ try {
             echo json_encode(['online' => $ret === 0]);
             break;
 
+        case 'db_backup':
+            $path = $db->getDbPath();
+            if (!file_exists($path)) throw new Exception('Database file not found.');
+            $filename = 'lightbox-backup-' . date('Y-m-d') . '.db';
+            header('Content-Type: application/octet-stream', true);
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Content-Length: ' . filesize($path));
+            readfile($path);
+            exit;
+
+        case 'db_restore':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            if (empty($_FILES['db_file']) || $_FILES['db_file']['error'] !== UPLOAD_ERR_OK) {
+                throw new Exception('No file uploaded or upload error.');
+            }
+            $tmp = $_FILES['db_file']['tmp_name'];
+
+            // Validate SQLite magic header
+            $fh    = fopen($tmp, 'rb');
+            $magic = fread($fh, 16);
+            fclose($fh);
+            if ($magic !== "SQLite format 3\x00") {
+                throw new Exception('Uploaded file is not a valid SQLite database.');
+            }
+
+            $dest = $db->getDbPath();
+            $db->close(); // release the PDO handle before replacing the file
+            if (!copy($tmp, $dest)) {
+                throw new Exception('Failed to write the database file. Check permissions.');
+            }
+            echo json_encode(['status' => 'success', 'message' => 'Database restored. Reload the page to apply.']);
+            exit;
+
         case 'pki_get':
             echo json_encode(['status' => 'success', 'pki' => $pki->getStatus()]);
             break;

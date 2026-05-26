@@ -1385,7 +1385,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const userForm = document.getElementById('user-form');
 
     // Wire tab meta
-    tabMeta['users'] = { title: 'User Accounts', desc: 'Manage Linux and Samba user accounts for file share access' };
+    tabMeta['users'] = { title: 'Settings', desc: 'User accounts, file share access, and configuration backup' };
 
     function loadUsersData() {
         fetch('/api.php?action=users_get')
@@ -1477,5 +1477,40 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(() => showToast('Server error deleting user.', 'error'));
     }
+
+    // --- CONFIG BACKUP & RESTORE ---
+    document.getElementById('db-restore-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const fileInput = document.getElementById('db-restore-file');
+        if (!fileInput.files.length) {
+            showToast('Please select a .db file to restore.', 'error');
+            return;
+        }
+        if (!confirm('Restore this backup? All current configuration will be replaced.')) return;
+
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.textContent = 'Restoring…';
+
+        const fd = new FormData();
+        fd.append('db_file', fileInput.files[0]);
+        fetch('/api.php?action=db_restore', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showToast(data.message);
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showToast(data.message, 'error');
+                    btn.disabled = false;
+                    btn.textContent = '↑ Restore';
+                }
+            })
+            .catch(() => {
+                showToast('Restore failed. Check the file and try again.', 'error');
+                btn.disabled = false;
+                btn.textContent = '↑ Restore';
+            });
+    });
 
 });

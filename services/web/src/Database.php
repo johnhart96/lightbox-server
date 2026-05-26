@@ -33,6 +33,14 @@ class Database {
         return self::$instance;
     }
 
+    public function getDbPath(): string {
+        return $this->dbPath;
+    }
+
+    public function close(): void {
+        $this->pdo = null;
+    }
+
     public function getConnection() {
         return $this->pdo;
     }

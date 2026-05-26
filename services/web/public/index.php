@@ -96,7 +96,7 @@ $currentUser = Auth::currentUser();
                     </li>
                     <li>
                         <a href="#users" class="nav-link" data-tab="users">
-                            <span class="icon">👤</span> User Accounts
+                            <span class="icon">⚙️</span> Settings
                         </a>
                     </li>
                 </ul>
@@ -768,7 +768,7 @@ $currentUser = Auth::currentUser();
                     </div>
                 </section>
 
-                <!-- Tab: User Accounts -->
+                <!-- Tab: Settings -->
                 <section id="tab-users" class="tab-panel">
                     <div class="card table-card">
                         <div class="card-header-btn">
@@ -793,6 +793,29 @@ $currentUser = Auth::currentUser();
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+
+                    <div class="card" style="max-width:600px; margin-top:0;">
+                        <h3>Configuration Backup &amp; Restore</h3>
+                        <p class="desc-text">The <code>lightbox.db</code> file contains all DNS records, DHCP settings, reservations, shares, and system configuration. Download it as a backup or upload a previous backup to restore.</p>
+
+                        <div style="display:flex; flex-direction:column; gap:24px;">
+                            <div>
+                                <h4 style="margin:0 0 10px; font-size:0.95rem; color:var(--text-primary)">Download Backup</h4>
+                                <a id="db-download-btn" class="btn btn-secondary" href="/api.php?action=db_backup">&#8595; Download lightbox.db</a>
+                            </div>
+
+                            <div>
+                                <h4 style="margin:0 0 10px; font-size:0.95rem; color:var(--text-primary)">Restore from Backup</h4>
+                                <div class="info-alert" style="margin-bottom:14px">
+                                    <strong>Warning:</strong> Restoring replaces all current configuration. PKI certificates are not stored in the database and will be unaffected. Reload the page after a successful restore.
+                                </div>
+                                <form id="db-restore-form" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                                    <input type="file" id="db-restore-file" name="db_file" accept=".db" style="flex:1; min-width:180px;">
+                                    <button type="submit" class="btn btn-secondary">&#8593; Restore</button>
+                                </form>
+                            </div>
                         </div>
                     </div>
                 </section>
