@@ -43,5 +43,4 @@ By replacing manual configuration files with an intuitive web interface, Lightbo
 ## How to install
 1) Install docker on your machine
 2) Clone the repo ```git clone https://github.com/johnhart96/lightbox-server.git```
-3) Run: ```docker compose build```
-4) Run: ```docker compose up -d```
+3) Run: ```install.sh```
