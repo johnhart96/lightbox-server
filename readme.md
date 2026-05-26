@@ -21,15 +21,17 @@ By replacing manual configuration files with an intuitive web interface, Lightbo
 *   **Unified Devices Tab:** An inventory dashboard tracking all manually assigned and DHCP-leased devices with real-time online/offline status tracking.
 *   **Access Control:** Robust user authentication layers for both the management Web UI and underlying Samba fileshares.
 *   **Service Toggles:** A quick-access settings dialog to easily spin services up or down (utilizing `docker start / stop` backends).
+*   **TFTP Deployment:** Dedicate a specific fileshare directory to act as a TFTP root, streamlining firmware updates for lighting nodes and fixtures.
 ---
 
 ## 🗺️ Roadmap & In-Progress
 
 ### ⚡ Active Development
 
+
 ### 🛠️ Upcoming Features
 
-*   **TFTP Deployment:** Dedicate a specific fileshare directory to act as a TFTP root, streamlining firmware updates for lighting nodes and fixtures.
+
 *   **Local PKI:** Integrated Certificate Authority (CA) to easily deploy and sign local SSL/TLS certificates.
 *   **Advanced Networking:** Reverse DNS zone management, centralized Syslog collection, and native Wi-Fi infrastructure support.
 
