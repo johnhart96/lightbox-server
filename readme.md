@@ -28,13 +28,8 @@ By replacing manual configuration files with an intuitive web interface, Lightbo
 
 ### ⚡ Active Development
 
-
-### 🛠️ Upcoming Features
-
-
 *   **Local PKI:** Integrated Certificate Authority (CA) to easily deploy and sign local SSL/TLS certificates.
 *   **Advanced Networking:** Reverse DNS zone management, and native Wi-Fi infrastructure support.
-
 
 ## 🐛 Known Bugs
 
