@@ -308,20 +308,16 @@ try {
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
             $id = $_POST['id'] ?? '';
             $name = trim($_POST['share_name'] ?? '');
-            $path = trim($_POST['share_path'] ?? '');
             $writable = isset($_POST['writable']) ? 1 : 0;
             $guest = isset($_POST['guest_ok']) ? 1 : 0;
             $desc = trim($_POST['description'] ?? '');
             $isTftp = isset($_POST['is_tftp']) ? 1 : 0;
 
-            if (empty($name) || empty($path)) {
-                throw new Exception('Share name and folder path are required.');
+            if (empty($name)) {
+                throw new Exception('Share name is required.');
             }
 
-            // Ensure path starts with /shares/ for safety inside container
-            if (strpos($path, '/shares/') !== 0) {
-                throw new Exception('Share folder path must begin with /shares/ for Docker storage safety.');
-            }
+            $path = '/shares/' . $name;
 
             $pdo = $db->getConnection();
             // Only one share may be the TFTP share — clear the flag on all others first

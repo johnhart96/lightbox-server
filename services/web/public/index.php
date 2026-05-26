@@ -770,11 +770,7 @@ $currentUser = Auth::currentUser();
                     <label for="samba_name">Share Name</label>
                     <input type="text" id="samba_name" name="share_name" required placeholder="ShowFiles">
                 </div>
-                <div class="form-group">
-                    <label for="samba_path">Folder Path (Inside Container)</label>
-                    <input type="text" id="samba_path" name="share_path" required placeholder="/shares/ShowFiles">
-                    <span class="help-text">Folder must be inside <code>/shares/</code> to map correctly to host disk.</span>
-                </div>
+
                 <div class="form-group-row">
                     <div class="form-group checkbox-group">
                         <input type="checkbox" id="samba_writable" name="writable" value="1" checked>

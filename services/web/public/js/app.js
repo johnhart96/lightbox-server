@@ -687,7 +687,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <td><span class="badge ${s.is_tftp == 1 ? 'active' : 'inactive'}">${s.is_tftp == 1 ? 'Yes' : 'No'}</span></td>
                                 <td class="text-muted">${s.description || ''}</td>
                                 <td>
-                                    <button class="btn-edit-sm" data-id="${s.id}" data-name="${s.share_name}" data-path="${s.share_path}" data-write="${s.writable}" data-guest="${s.guest_ok}" data-tftp="${s.is_tftp}" data-desc="${s.description || ''}">Edit</button>
+                                    <button class="btn-edit-sm" data-id="${s.id}" data-name="${s.share_name}" data-write="${s.writable}" data-guest="${s.guest_ok}" data-tftp="${s.is_tftp}" data-desc="${s.description || ''}">Edit</button>
                                     <button class="btn-danger-sm delete-samba-btn" data-id="${s.id}" ${s.share_name === 'ShowFiles' ? 'disabled' : ''}>Delete</button>
                                 </td>
                             `;
@@ -699,7 +699,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                 document.getElementById('samba-modal-title').textContent = 'Edit Samba Share';
                                 document.getElementById('samba_id').value = btn.dataset.id;
                                 document.getElementById('samba_name').value = btn.dataset.name;
-                                document.getElementById('samba_path').value = btn.dataset.path;
                                 document.getElementById('samba_writable').checked = btn.dataset.write === '1';
                                 document.getElementById('samba_guest').checked = btn.dataset.guest === '1';
                                 document.getElementById('samba_tftp').checked = btn.dataset.tftp === '1';
