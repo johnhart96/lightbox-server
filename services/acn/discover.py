@@ -38,6 +38,26 @@ API_URL       = os.getenv('API_URL', 'http://localhost:8080/api.php')
 POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '30'))
 STARTUP_DELAY = int(os.getenv('STARTUP_DELAY', '15'))
 
+def _resolve_api_url(url: str, ifaces: list[tuple[str, str]]) -> str:
+    """If API_URL points at loopback, replace the hostname with a physical
+    interface IP so Docker's iptables DNAT can forward the request to the
+    web container.  This is necessary when Docker runs with userland-proxy
+    disabled: nothing listens on loopback:8080, so connections silently hit
+    whatever else is bound there instead of the mapped container port.
+    """
+    import urllib.parse
+    parsed = urllib.parse.urlparse(url)
+    if parsed.hostname not in ('localhost', '127.0.0.1', '::1'):
+        return url
+    for _name, ip in ifaces:
+        if ip.startswith('172.'):   # skip Docker bridge IPs
+            continue
+        fixed = url.replace(parsed.hostname, ip, 1)
+        log.info('API_URL uses loopback — rewriting to %s '
+                 '(Docker userland-proxy appears disabled)', fixed)
+        return fixed
+    return url
+
 log = logging.getLogger('discover')
 
 # ---------------------------------------------------------------------------
@@ -105,15 +125,15 @@ def build_srvreqst(xid: int, scope: str = 'DEFAULT') -> bytes:
     ), xid)
 
 
-def build_attrrqst(url: str, xid: int) -> bytes:
-    url_b = url.encode()
-    scope = b''   # empty = any scope, consistent with build_srvreqst
-    tags  = b'device-description'
+def build_attrrqst(url: str, xid: int, scope: str = '') -> bytes:
+    url_b   = url.encode()
+    scope_b = scope.encode()
+    tags    = b'device-description'
     return _slp_header(6, (
         b'\x00\x00' +
-        struct.pack('>H', len(url_b)) + url_b  +
-        struct.pack('>H', len(scope)) + scope  +
-        struct.pack('>H', len(tags))  + tags   +
+        struct.pack('>H', len(url_b))   + url_b   +
+        struct.pack('>H', len(scope_b)) + scope_b +
+        struct.pack('>H', len(tags))    + tags     +
         b'\x00\x00'
     ), xid)
 
@@ -250,8 +270,12 @@ def register_device(cid: str | None, ip: str, description: str):
     }).encode()
     try:
         req = urllib.request.Request(f'{API_URL}?action=acn_sync', data=body, method='POST')
+        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
         with urllib.request.urlopen(req, timeout=5):
             log.info('Registered  %-20s → %s', hostname, ip)
+    except urllib.error.HTTPError as exc:
+        body_preview = exc.read(200).decode('utf-8', errors='replace').strip()
+        log.warning('API HTTP %d for %s: %s', exc.code, ip, body_preview or exc.reason)
     except urllib.error.URLError as exc:
         log.warning('API error for %s: %s', ip, exc)
 
@@ -260,10 +284,13 @@ def register_device(cid: str | None, ip: str, description: str):
 # ---------------------------------------------------------------------------
 
 class Discoverer:
+    FALLBACK_COOLDOWN = 300   # seconds between fallback registrations for the same IP
+
     def __init__(self):
-        self._xid             = 1
-        self._pending: dict[int, tuple] = {}   # xid → (cid, ip, url)
-        self._scope_fallbacks: set[str] = set() # IPs registered via scope-error fallback this poll
+        self._xid              = 1
+        self._pending: dict[int, tuple] = {}    # xid → (cid, ip, url)
+        self._fallback_sent: set[str]   = set() # IPs attempted as fallback this poll cycle
+        self._fallback_times: dict[str, float] = {}  # ip → monotonic time of last registration
 
     def _next_xid(self) -> int:
         x = self._xid
@@ -320,22 +347,34 @@ class Discoverer:
         func = data[1] if len(data) >= 2 else 0
 
         if func == 2:   # SrvRply
-            # Log any error code so scope mismatches are visible in docker logs
             off = _slp_body_offset(data)
             if off and len(data) >= off + 2:
                 err = struct.unpack('>H', data[off:off+2])[0]
                 if err:
                     _SLP_ERRORS = {4: 'SCOPE_NOT_SUPPORTED', 6: 'AUTHENTICATION_FAILED'}
-                    log.info('SLP error %d (%s) from %s',
-                             err, _SLP_ERRORS.get(err, 'unknown'), src_ip)
-                    if err == 4 and src_ip not in self._scope_fallbacks:
-                        # Device IS an ACN SA (it replied to service:acn.esta) but
-                        # uses an unknown scope — register with a synthetic CID so
-                        # it at least appears in DNS. Track it so we only register
-                        # once per poll cycle rather than once per scope attempt.
-                        self._scope_fallbacks.add(src_ip)
-                        cid = 'acn-' + src_ip.replace('.', '')
-                        register_device(cid, src_ip, '')
+                    log.debug('SLP error %d (%s) from %s',
+                              err, _SLP_ERRORS.get(err, 'unknown'), src_ip)
+                    if err == 4 and src_ip not in self._fallback_sent:
+                        self._fallback_sent.add(src_ip)
+                        now = time.monotonic()
+                        if now - self._fallback_times.get(src_ip, 0) >= self.FALLBACK_COOLDOWN:
+                            self._fallback_times[src_ip] = now
+                            log.info('ACN device at %s replied to service:acn.esta '
+                                     '(unknown scope) — registering with fallback name', src_ip)
+                            cid = 'acn-' + src_ip.replace('.', '')
+                            register_device(cid, src_ip, '')
+                            # Probe for real device name: send AttrRqst unicast with
+                            # each scope variant — whichever matches will yield
+                            # device-description and trigger a re-registration.
+                            attr_xid = self._next_xid()
+                            self._pending[attr_xid] = (cid, src_ip, ACN_SVC_TYPE)
+                            for scope in SLP_SCOPES:
+                                try:
+                                    slp.sendto(
+                                        build_attrrqst(ACN_SVC_TYPE, attr_xid, scope),
+                                        (src_ip, SLP_PORT))
+                                except OSError:
+                                    pass
             for url in parse_srvreply(data):
                 if ACN_SVC_TYPE.lower() not in url.lower():
                     continue
@@ -364,6 +403,12 @@ class Discoverer:
             register_device(cid, ip, desc)
 
         elif func == 7:  # AttrRply
+            # Skip error replies — leave the pending entry so the next scope
+            # variant's AttrRply still has a chance to match.
+            off = _slp_body_offset(data)
+            if off and len(data) >= off + 2:
+                if struct.unpack('>H', data[off:off+2])[0] != 0:
+                    return
             xid = next((k for k, (_, ip, _) in self._pending.items()
                         if ip == src_ip), None)
             if xid is not None:
@@ -394,6 +439,9 @@ class Discoverer:
                  len(ifaces),
                  ', '.join(f'{n} ({ip})' for n, ip in ifaces))
 
+        global API_URL
+        API_URL = _resolve_api_url(API_URL, ifaces)
+
         slp_socks  = []
         artnet_txs = []
         for name, ip in ifaces:
@@ -414,7 +462,7 @@ class Discoverer:
         while True:
             now = time.monotonic()
             if now - last_poll >= POLL_INTERVAL:
-                self._scope_fallbacks.clear()
+                self._fallback_sent.clear()
                 for scope in SLP_SCOPES:
                     for s in slp_socks:
                         xid = self._next_xid()

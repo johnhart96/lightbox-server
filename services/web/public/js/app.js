@@ -970,6 +970,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
 
                 devices.forEach((device, idx) => {
+                    const primary = sourceBadge[device.source] || `<span class="badge">${device.source}</span>`;
+                    const acnTag  = (device.acn && device.source !== 'acn') ? ' <span class="badge acn">ACN</span>' : '';
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>
@@ -981,7 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td><strong>${device.hostname}</strong></td>
                         <td><code>${device.ip}</code></td>
                         <td class="text-muted fqdn-cell">${device.hostname}.${data.domain}</td>
-                        <td>${sourceBadge[device.source] || `<span class="badge">${device.source}</span>`}</td>
+                        <td>${primary}${acnTag}</td>
                         <td class="text-muted">${device.info || ''}</td>
                     `;
                     tbody.appendChild(tr);

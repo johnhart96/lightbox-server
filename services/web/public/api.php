@@ -455,47 +455,48 @@ try {
             $pdo      = $db->getConnection();
             $settings = $db->getSettings();
             $domain   = $settings['domain_name'] ?? 'lighting.local';
-            $devices  = [];
-            $seen     = [];
+            $byIp     = [];  // ip => device entry (dedup by IP, not hostname)
 
             // Custom DNS A records
             $rows = $pdo->query("SELECT hostname, ip_address, description FROM dns_records WHERE ip_type = 'A' ORDER BY hostname")->fetchAll();
             foreach ($rows as $r) {
-                $key = strtolower($r['hostname']);
-                if (in_array($key, $seen, true)) continue;
-                $seen[]    = $key;
-                $devices[] = ['hostname' => $r['hostname'], 'ip' => $r['ip_address'], 'source' => 'custom',      'info' => $r['description'] ?: ''];
+                $ip = $r['ip_address'];
+                if (isset($byIp[$ip])) continue;
+                $byIp[$ip] = ['hostname' => $r['hostname'], 'ip' => $ip, 'source' => 'custom', 'info' => $r['description'] ?: '', 'acn' => false];
             }
 
             // DHCP static reservations (IPv4 only)
             $rows = $pdo->query("SELECT hostname, ip_address, mac_address FROM dhcp_reservations WHERE ip_type = 'IPv4' ORDER BY hostname")->fetchAll();
             foreach ($rows as $r) {
-                $key = strtolower($r['hostname']);
-                if (in_array($key, $seen, true)) continue;
-                $seen[]    = $key;
-                $devices[] = ['hostname' => $r['hostname'], 'ip' => $r['ip_address'], 'source' => 'reservation', 'info' => $r['mac_address']];
+                $ip = $r['ip_address'];
+                if (isset($byIp[$ip])) continue;
+                $byIp[$ip] = ['hostname' => $r['hostname'], 'ip' => $ip, 'source' => 'reservation', 'info' => $r['mac_address'], 'acn' => false];
             }
 
             // Dynamic DHCP leases with hostnames
             foreach (getActiveLeases() as $l) {
                 if ($l['hostname'] === 'Unknown') continue;
                 if (!filter_var($l['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) continue;
-                $key = strtolower($l['hostname']);
-                if (in_array($key, $seen, true)) continue;
-                $seen[]    = $key;
-                $devices[] = ['hostname' => $l['hostname'], 'ip' => $l['ip'], 'source' => 'dynamic', 'info' => $l['expiry']];
+                $ip = $l['ip'];
+                if (isset($byIp[$ip])) continue;
+                $byIp[$ip] = ['hostname' => $l['hostname'], 'ip' => $ip, 'source' => 'dynamic', 'info' => $l['expiry'], 'acn' => false];
             }
 
-            // ACN discovered devices (seen within 10 minutes)
+            // ACN discovered devices (seen within 10 minutes).
+            // If the IP already has an entry from another source, just mark it
+            // as ACN-seen rather than duplicating the row.
             $stale = time() - 600;
             $rows  = $pdo->query("SELECT hostname, ip_address, description FROM acn_devices WHERE last_seen > $stale ORDER BY hostname")->fetchAll();
             foreach ($rows as $a) {
-                $key = strtolower($a['hostname']);
-                if (in_array($key, $seen, true)) continue;
-                $seen[]    = $key;
-                $devices[] = ['hostname' => $a['hostname'], 'ip' => $a['ip_address'], 'source' => 'acn', 'info' => $a['description'] ?: ''];
+                $ip = $a['ip_address'];
+                if (isset($byIp[$ip])) {
+                    $byIp[$ip]['acn'] = true;
+                } else {
+                    $byIp[$ip] = ['hostname' => $a['hostname'], 'ip' => $ip, 'source' => 'acn', 'info' => $a['description'] ?: '', 'acn' => true];
+                }
             }
 
+            $devices = array_values($byIp);
             usort($devices, fn($a, $b) => strcmp($a['hostname'], $b['hostname']));
             echo json_encode(['status' => 'success', 'devices' => $devices, 'domain' => $domain]);
             break;
