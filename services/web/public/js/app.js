@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dashboard: { title: 'Dashboard', desc: 'System health overview and active leases' },
         dns: { title: 'DNS Configuration', desc: 'Manage local name resolution and upstream DNS servers' },
         dhcp: { title: 'DHCP Server', desc: 'Manage IP address assignments and static network reservations' },
+        pki: { title: 'Local PKI', desc: 'Integrated Certificate Authority — generate and distribute trusted local TLS certificates' },
         ntp: { title: 'NTP Synchronization', desc: 'Configure system time and network synchronization pools' },
         syslog: { title: 'Syslog Receiver', desc: 'Centralised syslog collection from network devices via UDP/TCP 514' },
         samba: { title: 'File Sharing', desc: 'Expose storage directories to network clients via SMB' },
@@ -40,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Load tab-specific data
         if (tabId === 'dns') loadDNSData();
         if (tabId === 'dhcp') loadDHCPData();
+        if (tabId === 'pki') loadPKIData();
         if (tabId === 'ntp') loadNTPData();
         if (tabId === 'syslog') loadSyslogData();
         if (tabId === 'samba') loadSambaData();
@@ -535,30 +537,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No custom host records defined.</td></tr>';
                     }
-                    // Populate DHCP hostname DNS entries table
-                    const dhcpTbody = document.querySelector('#dhcp-dns-table tbody');
-                    dhcpTbody.innerHTML = '';
-                    if (data.dhcp_dns_entries && data.dhcp_dns_entries.length > 0) {
-                        data.dhcp_dns_entries.forEach(l => {
-                            const tr = document.createElement('tr');
-                            const sourceLabel = l.source === 'reservation'
-                                ? '<span class="badge active">Reservation</span>'
-                                : l.source === 'acn'
-                                    ? `<span class="badge acn" title="${l.description || 'ACN device'}">ACN</span>`
-                                    : '<span class="badge pending">Dynamic</span>';
-                            tr.innerHTML = `
-                                <td><strong>${l.hostname}</strong>.${data.settings.domain_name}</td>
-                                <td><code>${l.ip}</code></td>
-                                <td><span class="badge ${l.type === 'A' ? 'active' : 'pending'}">${l.type}</span></td>
-                                <td>${sourceLabel}</td>
-                                <td class="text-muted">${l.expiry}</td>
-                            `;
-                            dhcpTbody.appendChild(tr);
-                        });
-                    } else {
-                        dhcpTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No DHCP reservations or active leases with hostnames found.</td></tr>';
-                    }
-
                     // Populate DNS Zone Entries table (forward + reverse combined)
                     const allEntries = [
                         ...(data.records || []).map(r => ({
@@ -648,6 +626,103 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
     }
+
+    // --- TAB: PKI ---
+    function loadPKIData() {
+        fetch('/api.php?action=pki_get')
+            .then(r => r.json())
+            .then(data => {
+                if (data.status !== 'success') return;
+                renderCACard(data.pki.ca);
+                renderWildcardCard(data.pki.wildcard);
+            });
+    }
+
+    function renderCACard(ca) {
+        const body = document.getElementById('pki-ca-body');
+        const newBtn = document.getElementById('pki-new-ca-btn');
+        if (!ca) {
+            newBtn.style.display = 'none';
+            body.innerHTML = `
+                <p class="text-muted" style="margin-bottom:20px">No Certificate Authority has been generated yet.</p>
+                <button id="pki-generate-btn" class="btn btn-primary" style="width:100%">Generate CA &amp; Wildcard Certificate</button>`;
+            document.getElementById('pki-generate-btn').addEventListener('click', () => pkiRegenerate('all'));
+            return;
+        }
+        newBtn.style.display = '';
+        const statusBadge = ca.expired
+            ? '<span class="badge inactive">Expired</span>'
+            : '<span class="badge active">Active</span>';
+        body.innerHTML = `
+            <div class="pki-info">
+                <span class="pki-label">Status</span>      <span>${statusBadge}</span>
+                <span class="pki-label">Subject</span>     <span>${ca.subject}</span>
+                <span class="pki-label">Valid From</span>  <span>${ca.valid_from}</span>
+                <span class="pki-label">Valid Until</span> <span>${ca.valid_to}</span>
+            </div>
+            <p class="desc-text">Import this CA into your OS or browser once to trust all local certificates.</p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px">
+                <a class="btn btn-secondary" href="/api.php?action=pki_download&file=ca_cert">&#8595; Download CA Certificate (.crt)</a>
+            </div>`;
+    }
+
+    function renderWildcardCard(wc) {
+        const body  = document.getElementById('pki-wildcard-body');
+        const regen = document.getElementById('pki-regen-btn');
+        if (!wc) {
+            regen.style.display = 'none';
+            body.innerHTML = `<p class="text-muted text-center" style="padding:20px 0">Generate a CA first to create a wildcard certificate.</p>`;
+            return;
+        }
+        regen.style.display = '';
+        const expired  = wc.expired;
+        const statusBadge = expired
+            ? '<span class="badge inactive">Expired</span>'
+            : '<span class="badge active">Valid</span>';
+        const sans = (wc.sans || []).map(s => `<code>${s}</code>`).join(' ');
+        body.innerHTML = `
+            <div class="pki-info">
+                <span class="pki-label">Status</span>      <span>${statusBadge}</span>
+                <span class="pki-label">Domain</span>      <span><code>*.${wc.domain || wc.subject}</code></span>
+                <span class="pki-label">SANs</span>        <span>${sans}</span>
+                <span class="pki-label">Valid From</span>  <span>${wc.valid_from}</span>
+                <span class="pki-label">Valid Until</span> <span>${wc.valid_to}</span>
+                <span class="pki-label">Issued By</span>   <span>${wc.issuer}</span>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px">
+                <a class="btn btn-secondary" href="/api.php?action=pki_download&file=wildcard_cert">&#8595; Certificate (.crt)</a>
+                <a class="btn btn-secondary" href="/api.php?action=pki_download&file=wildcard_key">&#8595; Private Key (.key)</a>
+            </div>`;
+    }
+
+    function pkiRegenerate(scope) {
+        const regenBtn   = document.getElementById('pki-regen-btn');
+        const generateBtn = document.getElementById('pki-generate-btn');
+        const btn = regenBtn || generateBtn;
+        if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+
+        const fd = new FormData();
+        fd.append('scope', scope);
+        fetch('/api.php?action=pki_regenerate', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showToast(data.message);
+                    renderCACard(data.pki.ca);
+                    renderWildcardCard(data.pki.wildcard);
+                } else {
+                    showToast(data.message, 'error');
+                    if (btn) { btn.disabled = false; btn.textContent = scope === 'all' ? 'Generate CA & Wildcard Certificate' : '↻ Regenerate'; }
+                }
+            });
+    }
+
+    document.getElementById('pki-regen-btn').addEventListener('click', () => pkiRegenerate('wildcard'));
+    document.getElementById('pki-new-ca-btn').addEventListener('click', () => {
+        if (confirm('Generate a new CA? Any devices that imported the old CA will need to re-import it.')) {
+            pkiRegenerate('all');
+        }
+    });
 
     // --- TAB: DHCP DATA & ACTIONS ---
     const dhcpForm = document.getElementById('dhcp-settings-form');

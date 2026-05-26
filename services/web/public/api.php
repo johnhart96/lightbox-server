@@ -7,6 +7,7 @@ require_once __DIR__ . '/../src/ConfigGenerator.php';
 require_once __DIR__ . '/../src/SystemManager.php';
 require_once __DIR__ . '/../src/UserManager.php';
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/PKIManager.php';
 
 use App\Database;
 use App\ConfigGenerator;
@@ -18,6 +19,7 @@ $db = Database::getInstance();
 $system = new SystemManager();
 $generator = new ConfigGenerator($db);
 $users = new UserManager($db);
+$pki = new \App\PKIManager();
 
 Auth::requireLoginApi($users);
 
@@ -138,13 +140,23 @@ try {
 
         case 'dns_save':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $oldDomain = $db->getSettings()['domain_name'] ?? '';
+            $newDomain = trim($_POST['domain_name'] ?? 'lighting.local');
             $db->updateSetting('system_name',   $_POST['system_name']   ?? 'Lightbox-Server');
-            $db->updateSetting('domain_name',   $_POST['domain_name']   ?? 'lighting.local');
+            $db->updateSetting('domain_name',   $newDomain);
             $db->updateSetting('primary_dns',   $_POST['primary_dns']   ?? '8.8.8.8');
             $db->updateSetting('secondary_dns', $_POST['secondary_dns'] ?? '');
             $db->updateSetting('dns_interface', $_POST['dns_interface'] ?? '');
             $db->updateSetting('pending_changes', '1');
-            
+
+            if ($newDomain !== $oldDomain && $pki->caExists()) {
+                try {
+                    $pki->generateWildcard($newDomain);
+                } catch (Exception $e) {
+                    $db->addAlert('warning', 'pki', 'Wildcard cert regen failed after domain change: ' . $e->getMessage());
+                }
+            }
+
             echo json_encode(['status' => 'success', 'message' => 'DNS settings saved. Apply changes to activate.']);
             break;
 
@@ -448,6 +460,37 @@ try {
             exec('ping -c 1 -W 1 -q ' . escapeshellarg($ip) . ' 2>/dev/null', $out, $ret);
             echo json_encode(['online' => $ret === 0]);
             break;
+
+        case 'pki_get':
+            echo json_encode(['status' => 'success', 'pki' => $pki->getStatus()]);
+            break;
+
+        case 'pki_regenerate':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $scope  = $_POST['scope'] ?? 'wildcard';
+            $domain = $db->getSettings()['domain_name'] ?? 'lighting.local';
+            if ($scope === 'all' || !$pki->caExists()) {
+                $pki->generateCA();
+            }
+            $pki->generateWildcard($domain);
+            echo json_encode(['status' => 'success', 'message' => 'Certificates generated successfully.', 'pki' => $pki->getStatus()]);
+            break;
+
+        case 'pki_download':
+            $file = $_GET['file'] ?? '';
+            $map  = [
+                'ca_cert'       => ['/data/pki/ca.crt',      'lightbox-ca.crt', 'application/x-x509-ca-cert'],
+                'wildcard_cert' => ['/data/pki/wildcard.crt', 'wildcard.crt',    'application/x-pem-file'],
+                'wildcard_key'  => ['/data/pki/wildcard.key', 'wildcard.key',    'application/x-pem-file'],
+            ];
+            if (!isset($map[$file])) throw new Exception('Invalid file requested.');
+            [$path, $name, $type] = $map[$file];
+            if (!file_exists($path)) throw new Exception('Certificate not found. Generate certificates first.');
+            header('Content-Type: ' . $type, true);
+            header('Content-Disposition: attachment; filename="' . $name . '"');
+            header('Content-Length: ' . filesize($path));
+            echo file_get_contents($path);
+            exit;
 
         case 'apply_changes':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');

@@ -1468,3 +1468,17 @@ input:checked + .slider:before {
     flex-shrink: 0;
     align-items: flex-end;
 }
+
+/* PKI tab — cert info grid */
+.pki-info {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    gap: 10px 16px;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+
+.pki-label {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}

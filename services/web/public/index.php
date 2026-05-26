@@ -65,6 +65,11 @@ $currentUser = Auth::currentUser();
                         </a>
                     </li>
                     <li>
+                        <a href="#pki" class="nav-link" data-tab="pki">
+                            <span class="icon">🔒</span> Local PKI
+                        </a>
+                    </li>
+                    <li>
                         <a href="#ntp" class="nav-link" data-tab="ntp">
                             <span class="icon">⏰</span> NTP (Time)
                         </a>
@@ -364,53 +369,28 @@ $currentUser = Auth::currentUser();
                             </form>
                         </div>
 
-                        <div style="display: flex; flex-direction: column; gap: 24px;">
-                            <div class="card table-card">
-                                <div class="card-header-btn">
-                                    <h3>Custom Host Records</h3>
-                                    <button id="add-dns-record-btn" class="btn btn-secondary btn-sm">+ Add Record</button>
-                                </div>
-                                <div class="table-wrapper">
-                                    <table id="dns-records-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Hostname</th>
-                                                <th>IP Address</th>
-                                                <th>Type</th>
-                                                <th>Description</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td colspan="5" class="text-center">Loading DNS records...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
+                        <div class="card table-card" style="align-self: stretch; display: flex; flex-direction: column;">
+                            <div class="card-header-btn">
+                                <h3>Custom Host Records</h3>
+                                <button id="add-dns-record-btn" class="btn btn-secondary btn-sm">+ Add Record</button>
                             </div>
-
-                            <div class="card table-card">
-                                <h3>DHCP Hostname DNS Entries</h3>
-                                <p class="text-muted" style="margin: 4px 0 14px; font-size: 0.875rem;">DNS entries created automatically from DHCP. Static reservations are always present; dynamic entries update every minute from active leases.</p>
-                                <div class="table-wrapper">
-                                    <table id="dhcp-dns-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Hostname</th>
-                                                <th>IP Address</th>
-                                                <th>Type</th>
-                                                <th>Source</th>
-                                                <th>Lease</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td colspan="5" class="text-center">Loading...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
+                            <div class="table-wrapper" style="flex: 1;">
+                                <table id="dns-records-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Hostname</th>
+                                            <th>IP Address</th>
+                                            <th>Type</th>
+                                            <th>Description</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colspan="5" class="text-center">Loading DNS records...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -576,6 +556,56 @@ $currentUser = Auth::currentUser();
                                         </tr>
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tab: PKI -->
+                <section id="tab-pki" class="tab-panel">
+                    <div class="settings-grid">
+
+                        <div class="card" id="pki-ca-card" style="align-self: stretch;">
+                            <div class="card-header-btn">
+                                <h3>Certificate Authority</h3>
+                                <button id="pki-new-ca-btn" class="btn btn-secondary btn-sm" style="display:none">↻ New CA</button>
+                            </div>
+                            <div id="pki-ca-body">
+                                <p class="text-muted text-center" style="padding:20px 0">Loading&hellip;</p>
+                            </div>
+                        </div>
+
+                        <div class="card" id="pki-wildcard-card" style="align-self: stretch;">
+                            <div class="card-header-btn">
+                                <h3>Wildcard Certificate</h3>
+                                <button id="pki-regen-btn" class="btn btn-secondary btn-sm">↻ Regenerate</button>
+                            </div>
+                            <div id="pki-wildcard-body">
+                                <p class="text-muted text-center" style="padding:20px 0">Loading&hellip;</p>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="card">
+                        <h3>Importing the CA Certificate</h3>
+                        <p class="desc-text">Install the CA certificate on any device that needs to trust local HTTPS services. You only need to do this once per device &mdash; all wildcard certificates issued by this CA will be trusted automatically.</p>
+                        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 8px;">
+                            <div class="info-alert" style="margin:0">
+                                <strong>Windows</strong><br>
+                                Double-click the <code>.crt</code> file &rarr; <em>Install Certificate</em> &rarr; <em>Local Machine</em> &rarr; <em>Trusted Root Certification Authorities</em>.
+                            </div>
+                            <div class="info-alert" style="margin:0">
+                                <strong>macOS</strong><br>
+                                Double-click the <code>.crt</code> to add to Keychain &rarr; find the cert &rarr; <em>Get Info</em> &rarr; <em>Trust</em> &rarr; set SSL to <em>Always Trust</em>.
+                            </div>
+                            <div class="info-alert" style="margin:0">
+                                <strong>Linux</strong><br>
+                                Copy to <code>/usr/local/share/ca-certificates/</code> and run <code>sudo update-ca-certificates</code>.
+                            </div>
+                            <div class="info-alert" style="margin:0">
+                                <strong>iOS / Android</strong><br>
+                                Open the <code>.crt</code> file from Files / Downloads &rarr; follow the system prompts to install. On iOS also enable it under <em>Settings &rarr; General &rarr; About &rarr; Certificate Trust Settings</em>.
                             </div>
                         </div>
                     </div>
