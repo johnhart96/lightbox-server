@@ -539,5 +539,13 @@ class ConfigGenerator {
         }
 
         file_put_contents($this->sambaConfPath, $content);
+
+        // Write TFTP root path for the samba container entrypoint.
+        // Contains the share_path of the TFTP-designated share, or is empty when none is set.
+        $tftpShare = $pdo->query("SELECT share_path FROM samba_shares WHERE is_tftp = 1 LIMIT 1")->fetch();
+        file_put_contents(
+            dirname($this->sambaConfPath) . '/tftp-root',
+            $tftpShare ? $tftpShare['share_path'] . "\n" : ''
+        );
     }
 }

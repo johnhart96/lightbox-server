@@ -86,8 +86,15 @@ class Database {
             share_path TEXT NOT NULL,
             writable INTEGER DEFAULT 1,
             guest_ok INTEGER DEFAULT 1,
-            description TEXT
+            description TEXT,
+            is_tftp INTEGER DEFAULT 0
         )");
+        // Migrate existing installs — add is_tftp if absent
+        try {
+            $this->pdo->exec("ALTER TABLE samba_shares ADD COLUMN is_tftp INTEGER DEFAULT 0");
+        } catch (\PDOException $e) {
+            // Column already exists
+        }
 
         // 6. Network interface addresses (legacy — superseded by interface_config)
         $this->pdo->exec("CREATE TABLE IF NOT EXISTS interface_addresses (

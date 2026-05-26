@@ -1,7 +1,7 @@
 FROM alpine:latest
 
-# Install samba
-RUN apk add --no-cache samba
+# Install samba and TFTP server
+RUN apk add --no-cache samba tftp-hpa
 
 # Create shares directory
 RUN mkdir -p /shares

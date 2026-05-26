@@ -312,6 +312,7 @@ try {
             $writable = isset($_POST['writable']) ? 1 : 0;
             $guest = isset($_POST['guest_ok']) ? 1 : 0;
             $desc = trim($_POST['description'] ?? '');
+            $isTftp = isset($_POST['is_tftp']) ? 1 : 0;
 
             if (empty($name) || empty($path)) {
                 throw new Exception('Share name and folder path are required.');
@@ -323,12 +324,16 @@ try {
             }
 
             $pdo = $db->getConnection();
+            // Only one share may be the TFTP share — clear the flag on all others first
+            if ($isTftp) {
+                $pdo->exec("UPDATE samba_shares SET is_tftp = 0");
+            }
             if (empty($id)) {
-                $stmt = $pdo->prepare("INSERT INTO samba_shares (share_name, share_path, writable, guest_ok, description) VALUES (:name, :path, :write, :guest, :desc)");
-                $stmt->execute([':name' => $name, ':path' => $path, ':write' => $writable, ':guest' => $guest, ':desc' => $desc]);
+                $stmt = $pdo->prepare("INSERT INTO samba_shares (share_name, share_path, writable, guest_ok, description, is_tftp) VALUES (:name, :path, :write, :guest, :desc, :tftp)");
+                $stmt->execute([':name' => $name, ':path' => $path, ':write' => $writable, ':guest' => $guest, ':desc' => $desc, ':tftp' => $isTftp]);
             } else {
-                $stmt = $pdo->prepare("UPDATE samba_shares SET share_name = :name, share_path = :path, writable = :write, guest_ok = :guest, description = :desc WHERE id = :id");
-                $stmt->execute([':name' => $name, ':path' => $path, ':write' => $writable, ':guest' => $guest, ':desc' => $desc, ':id' => $id]);
+                $stmt = $pdo->prepare("UPDATE samba_shares SET share_name = :name, share_path = :path, writable = :write, guest_ok = :guest, description = :desc, is_tftp = :tftp WHERE id = :id");
+                $stmt->execute([':name' => $name, ':path' => $path, ':write' => $writable, ':guest' => $guest, ':desc' => $desc, ':tftp' => $isTftp, ':id' => $id]);
             }
             $db->updateSetting('pending_changes', '1');
             echo json_encode(['status' => 'success', 'message' => 'Samba share saved.']);

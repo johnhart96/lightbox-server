@@ -575,13 +575,14 @@ $currentUser = Auth::currentUser();
                                         <th>Folder Path</th>
                                         <th>Writeable</th>
                                         <th>Public/Guest</th>
+                                        <th>TFTP</th>
                                         <th>Description</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr>
-                                        <td colspan="6" class="text-center">Loading shared folders...</td>
+                                        <td colspan="7" class="text-center">Loading shared folders...</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -783,6 +784,11 @@ $currentUser = Auth::currentUser();
                         <input type="checkbox" id="samba_guest" name="guest_ok" value="1" checked>
                         <label for="samba_guest">Allow Guest (Anonymous) Access</label>
                     </div>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="samba_tftp" name="is_tftp" value="1">
+                    <label for="samba_tftp">Use as TFTP Share</label>
+                    <span class="help-text" style="display:block;margin-top:2px;">Serves this folder via TFTP (UDP 69). Only one share can be the TFTP share at a time.</span>
                 </div>
                 <div class="form-group">
                     <label for="samba_desc">Description</label>
