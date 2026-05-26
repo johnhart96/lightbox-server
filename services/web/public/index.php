@@ -642,6 +642,7 @@ $currentUser = Auth::currentUser();
                                     <option value="dhcp">DHCP Service (lightbox-dhcp)</option>
                                     <option value="ntp">NTP Service (lightbox-ntp)</option>
                                     <option value="samba">File Service (lightbox-samba)</option>
+                                    <option value="acn">ACN Discovery (lightbox-acn)</option>
                                 </select>
                             </div>
                             <div class="logs-actions">
