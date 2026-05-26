@@ -52,12 +52,11 @@ try {
             echo json_encode([
                 'status' => 'success',
                 'services' => [
-                    'bind9'  => in_array('lightbox-bind9',   $running, true),
-                    'dhcp'   => in_array('lightbox-dhcp',    $running, true),
-                    'ntp'    => in_array('lightbox-ntp',     $running, true),
-                    'samba'  => in_array('lightbox-samba',   $running, true),
-                    'acn'    => in_array('lightbox-acn',     $running, true),
-                    'syslog' => in_array('lightbox-syslog',  $running, true),
+                    'bind9'  => in_array('lightbox-bind9',  $running, true),
+                    'dhcp'   => in_array('lightbox-dhcp',   $running, true),
+                    'ntp'    => in_array('lightbox-ntp',    $running, true),
+                    'samba'  => in_array('lightbox-samba',  $running, true),
+                    'syslog' => in_array('lightbox-syslog', $running, true),
                 ]
             ]);
             break;
@@ -80,7 +79,6 @@ try {
                     'dhcp'   => in_array('lightbox-dhcp',   $running, true),
                     'ntp'    => in_array('lightbox-ntp',    $running, true),
                     'samba'  => in_array('lightbox-samba',  $running, true),
-                    'acn'    => in_array('lightbox-acn',    $running, true),
                     'syslog' => in_array('lightbox-syslog', $running, true),
                 ],
                 'stats' => [
@@ -126,23 +124,6 @@ try {
                     'type'     => filter_var($l['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'A' : 'AAAA',
                     'expiry'   => $l['expiry'],
                     'source'   => 'dynamic',
-                ];
-            }
-
-            // ACN discovered devices
-            $stale   = time() - 600;
-            $acnRows = $pdo->query("SELECT cid, hostname, ip_address, description, last_seen FROM acn_devices WHERE last_seen > $stale ORDER BY hostname ASC")->fetchAll();
-            foreach ($acnRows as $a) {
-                if (in_array(strtolower($a['hostname']), $seenHostnames, true)) continue;
-                $seenHostnames[] = strtolower($a['hostname']);
-                $ago = max(0, (int)round((time() - $a['last_seen']) / 60));
-                $dhcpDnsEntries[] = [
-                    'hostname'    => $a['hostname'],
-                    'ip'          => $a['ip_address'],
-                    'type'        => filter_var($a['ip_address'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'A' : 'AAAA',
-                    'expiry'      => $ago === 0 ? 'Just seen' : "Seen {$ago}m ago",
-                    'source'      => 'acn',
-                    'description' => $a['description'],
                 ];
             }
 
@@ -406,39 +387,6 @@ try {
             echo json_encode(['status' => 'success', 'connectivity' => $connectivity]);
             break;
 
-        case 'acn_sync':
-            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
-            $cid      = trim($_POST['cid']         ?? '');
-            $hostname = trim($_POST['hostname']     ?? '');
-            $ip       = trim($_POST['ip_address']   ?? '');
-            $desc     = trim($_POST['description']  ?? '');
-
-            if (empty($hostname) || empty($ip)) throw new Exception('hostname and ip_address required');
-            if (!filter_var($ip, FILTER_VALIDATE_IP)) throw new Exception('Invalid IP address');
-
-            $pdo = $db->getConnection();
-            $key = $cid ?: $ip;
-
-            // Only sync DNS if the device is new or its IP changed
-            $prev = $pdo->prepare("SELECT ip_address FROM acn_devices WHERE cid = :k");
-            $prev->execute([':k' => $key]);
-            $old     = $prev->fetchColumn();
-            $changed = ($old === false || $old !== $ip);
-
-            $upsert = $pdo->prepare(
-                "INSERT OR REPLACE INTO acn_devices (cid, hostname, ip_address, description, last_seen)
-                 VALUES (:cid, :hostname, :ip, :desc, :now)"
-            );
-            $upsert->execute([':cid' => $key, ':hostname' => $hostname, ':ip' => $ip, ':desc' => $desc, ':now' => time()]);
-
-            if ($changed) {
-                $generator->syncDynamicLeases();
-                $system->reloadService('bind9');
-            }
-
-            echo json_encode(['status' => 'success', 'changed' => $changed]);
-            break;
-
         case 'sync_leases':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
 
@@ -466,7 +414,7 @@ try {
             foreach ($rows as $r) {
                 $ip = $r['ip_address'];
                 if (isset($byIp[$ip])) continue;
-                $byIp[$ip] = ['hostname' => $r['hostname'], 'ip' => $ip, 'source' => 'custom', 'info' => $r['description'] ?: '', 'acn' => false];
+                $byIp[$ip] = ['hostname' => $r['hostname'], 'ip' => $ip, 'source' => 'custom', 'info' => $r['description'] ?: ''];
             }
 
             // DHCP static reservations (IPv4 only)
@@ -474,7 +422,7 @@ try {
             foreach ($rows as $r) {
                 $ip = $r['ip_address'];
                 if (isset($byIp[$ip])) continue;
-                $byIp[$ip] = ['hostname' => $r['hostname'], 'ip' => $ip, 'source' => 'reservation', 'info' => $r['mac_address'], 'acn' => false];
+                $byIp[$ip] = ['hostname' => $r['hostname'], 'ip' => $ip, 'source' => 'reservation', 'info' => $r['mac_address']];
             }
 
             // Dynamic DHCP leases with hostnames
@@ -483,21 +431,7 @@ try {
                 if (!filter_var($l['ip'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) continue;
                 $ip = $l['ip'];
                 if (isset($byIp[$ip])) continue;
-                $byIp[$ip] = ['hostname' => $l['hostname'], 'ip' => $ip, 'source' => 'dynamic', 'info' => $l['expiry'], 'acn' => false];
-            }
-
-            // ACN discovered devices (seen within 10 minutes).
-            // If the IP already has an entry from another source, just mark it
-            // as ACN-seen rather than duplicating the row.
-            $stale = time() - 600;
-            $rows  = $pdo->query("SELECT hostname, ip_address, description FROM acn_devices WHERE last_seen > $stale ORDER BY hostname")->fetchAll();
-            foreach ($rows as $a) {
-                $ip = $a['ip_address'];
-                if (isset($byIp[$ip])) {
-                    $byIp[$ip]['acn'] = true;
-                } else {
-                    $byIp[$ip] = ['hostname' => $a['hostname'], 'ip' => $ip, 'source' => 'acn', 'info' => $a['description'] ?: '', 'acn' => true];
-                }
+                $byIp[$ip] = ['hostname' => $l['hostname'], 'ip' => $ip, 'source' => 'dynamic', 'info' => $l['expiry']];
             }
 
             $devices = array_values($byIp);
@@ -562,7 +496,7 @@ try {
 
         case 'service_toggle':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
-            $allowed = ['bind9' => 'lightbox-bind9', 'dhcp' => 'lightbox-dhcp', 'ntp' => 'lightbox-ntp', 'samba' => 'lightbox-samba', 'acn' => 'lightbox-acn', 'syslog' => 'lightbox-syslog'];
+            $allowed = ['bind9' => 'lightbox-bind9', 'dhcp' => 'lightbox-dhcp', 'ntp' => 'lightbox-ntp', 'samba' => 'lightbox-samba', 'syslog' => 'lightbox-syslog'];
             $service = $_POST['service'] ?? '';
             $state   = $_POST['state']   ?? '';
 

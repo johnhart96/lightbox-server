@@ -278,16 +278,6 @@ $currentUser = Auth::currentUser();
                                     </div>
                                 </li>
                                 <li>
-                                    <span class="service-name">ACN / Art-Poll Discovery (SLP)</span>
-                                    <div class="service-controls">
-                                        <span class="badge" id="status-acn">Checking...</span>
-                                        <label class="switch" title="Enable / disable ACN Discovery">
-                                            <input type="checkbox" id="toggle-acn" data-service="acn" disabled>
-                                            <span class="slider round"></span>
-                                        </label>
-                                    </div>
-                                </li>
-                                <li>
                                     <span class="service-name">Syslog Server (syslog-ng)</span>
                                     <div class="service-controls">
                                         <span class="badge" id="status-syslog">Checking...</span>
@@ -712,7 +702,6 @@ $currentUser = Auth::currentUser();
                                     <option value="dhcp">DHCP Service (lightbox-dhcp)</option>
                                     <option value="ntp">NTP Service (lightbox-ntp)</option>
                                     <option value="samba">File Service (lightbox-samba)</option>
-                                    <option value="acn">ACN Discovery (lightbox-acn)</option>
                                     <option value="syslog">Syslog Server (lightbox-syslog)</option>
                                 </select>
                             </div>

@@ -375,7 +375,6 @@ class SystemManager {
             case 'dhcp': $containerName = 'lightbox-dhcp'; break;
             case 'ntp': $containerName = 'lightbox-ntp'; break;
             case 'samba': $containerName = 'lightbox-samba'; break;
-            case 'acn':    $containerName = 'lightbox-acn';    break;
             case 'syslog': $containerName = 'lightbox-syslog'; break;
             default: return 'Invalid service';
         }

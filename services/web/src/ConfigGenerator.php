@@ -253,24 +253,13 @@ class ConfigGenerator {
             }
         }
 
-        // ACN discovered devices (ANSI E1.17 / SLP)
-        $acnDevices = $this->getActiveAcnDevices($staticHostnames);
-        if (!empty($acnDevices)) {
-            $zoneContent .= "\n; ACN Discovered Devices\n";
-            foreach ($acnDevices as $d) {
-                $zoneContent .= sprintf("%-15s IN      %-5s %s\n", $d['hostname'], $d['type'], $d['ip']);
-            }
-        }
-
         file_put_contents($this->bindZonesDir . '/db.' . $domain, $zoneContent);
     }
 
     /**
-     * Update the auto-managed sections ("; Dynamic DHCP Leases" and
-     * "; ACN Discovered Devices") at the end of the zone file.
-     * Avoids the docker exec calls inside generateBindConfig() / getHostIPs()
-     * so cron-triggered syncs are fast and don't pile up Apache workers.
-     * Returns true if the file was written.
+     * Update the auto-managed "; Dynamic DHCP Leases" section at the end of
+     * the zone file.  Avoids docker exec calls so cron-triggered syncs are
+     * fast and don't pile up Apache workers.  Returns true if the file was written.
      */
     public function syncDynamicLeases(): bool {
         $settings = $this->db->getSettings();
@@ -288,14 +277,12 @@ class ConfigGenerator {
 
         $content = file_get_contents($zoneFile);
 
-        // Strip everything from the first auto-managed section marker to end
-        $markers = ["\n; Dynamic DHCP Leases\n", "\n; ACN Discovered Devices\n"];
-        $cutPos  = strlen($content);
-        foreach ($markers as $m) {
-            $p = strpos($content, $m);
-            if ($p !== false && $p < $cutPos) $cutPos = $p;
+        // Strip the auto-managed section and everything after it
+        $marker = "\n; Dynamic DHCP Leases\n";
+        $cutPos = strpos($content, $marker);
+        if ($cutPos !== false) {
+            $content = substr($content, 0, $cutPos);
         }
-        $content = substr($content, 0, $cutPos);
 
         // Append DHCP dynamic section
         $dynamicLeases = $this->parseDynamicLeases($skipHostnames);
@@ -303,38 +290,11 @@ class ConfigGenerator {
             $content .= "\n; Dynamic DHCP Leases\n";
             foreach ($dynamicLeases as $lease) {
                 $content .= sprintf("%-15s IN      %-5s %s\n", $lease['hostname'], $lease['type'], $lease['ip']);
-                $skipHostnames[strtolower($lease['hostname'])] = true;
-            }
-        }
-
-        // Append ACN section
-        $acnDevices = $this->getActiveAcnDevices($skipHostnames);
-        if (!empty($acnDevices)) {
-            $content .= "\n; ACN Discovered Devices\n";
-            foreach ($acnDevices as $d) {
-                $content .= sprintf("%-15s IN      %-5s %s\n", $d['hostname'], $d['type'], $d['ip']);
             }
         }
 
         file_put_contents($zoneFile, $content);
         return true;
-    }
-
-    private function getActiveAcnDevices(array $skipHostnames = []): array {
-        $pdo     = $this->db->getConnection();
-        $stale   = time() - 600;   // exclude devices not seen in the last 10 minutes
-        $stmt    = $pdo->prepare("SELECT hostname, ip_address FROM acn_devices WHERE last_seen > :stale ORDER BY hostname");
-        $stmt->execute([':stale' => $stale]);
-        $devices = [];
-        $seen    = [];
-        while ($row = $stmt->fetch()) {
-            $key = strtolower($row['hostname']);
-            if (isset($seen[$key]) || isset($skipHostnames[$key])) continue;
-            $seen[$key] = true;
-            $type       = filter_var($row['ip_address'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? 'A' : 'AAAA';
-            $devices[]  = ['hostname' => $row['hostname'], 'ip' => $row['ip_address'], 'type' => $type];
-        }
-        return $devices;
     }
 
     private function parseDynamicLeases(array $skipHostnames = []): array {

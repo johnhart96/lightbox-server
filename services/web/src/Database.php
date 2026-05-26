@@ -115,16 +115,7 @@ class Database {
             v6_gateway     TEXT NOT NULL DEFAULT ''
         )");
 
-        // 8. ACN discovered devices (ANSI E1.17 / SLP)
-        $this->pdo->exec("CREATE TABLE IF NOT EXISTS acn_devices (
-            cid         TEXT PRIMARY KEY,
-            hostname    TEXT NOT NULL,
-            ip_address  TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            last_seen   INTEGER NOT NULL
-        )");
-
-        // 9. Local user accounts (Linux + Samba)
+        // 8. Local user accounts (Linux + Samba)
         $this->pdo->exec("CREATE TABLE IF NOT EXISTS users (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             username      TEXT UNIQUE NOT NULL,
@@ -140,7 +131,7 @@ class Database {
             // Column already exists
         }
 
-        // 10. System alerts (warnings and errors)
+        // 9. System alerts (warnings and errors)
         $this->pdo->exec("CREATE TABLE IF NOT EXISTS alerts (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             type            TEXT CHECK(type IN ('error', 'warning', 'info')) NOT NULL DEFAULT 'warning',

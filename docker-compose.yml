@@ -91,17 +91,3 @@ services:
     depends_on:
       web:
         condition: service_healthy
-
-  acn:
-    build:
-      context: ./services/acn
-    container_name: lightbox-acn
-    network_mode: host
-    environment:
-      - API_URL=http://localhost:8080/api.php
-      - POLL_INTERVAL=30
-      - STARTUP_DELAY=15
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
