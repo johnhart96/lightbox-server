@@ -80,6 +80,18 @@ services:
       web:
         condition: service_healthy
 
+  syslog:
+    build:
+      context: ./services/syslog
+    container_name: lightbox-syslog
+    network_mode: host
+    volumes:
+      - ./data/syslog:/data/syslog
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+
   acn:
     build:
       context: ./services/acn

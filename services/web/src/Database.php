@@ -140,6 +140,17 @@ class Database {
             // Column already exists
         }
 
+        // 10. System alerts (warnings and errors)
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS alerts (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            type            TEXT CHECK(type IN ('error', 'warning', 'info')) NOT NULL DEFAULT 'warning',
+            source          TEXT NOT NULL DEFAULT 'system',
+            message         TEXT NOT NULL,
+            created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            acknowledged_at DATETIME,
+            acknowledged_by TEXT
+        )");
+
         // Seed default settings if empty
         $stmt = $this->pdo->query("SELECT COUNT(*) FROM settings");
         if ($stmt->fetchColumn() == 0) {
@@ -151,8 +162,9 @@ class Database {
                 'ntp_servers' => '0.pool.ntp.org, 1.pool.ntp.org',
                 'dhcp_interface' => '', // Empty defaults to listening on all interfaces
                 'dns_interface'  => '', // Empty = auto-detect first available host IP
-                'advertise_dns'  => '1', // Offer Lightbox as DNS server via DHCP
-                'advertise_ntp'  => '0'  // Offer Lightbox as NTP server via DHCP
+                'advertise_dns'    => '1', // Offer Lightbox as DNS server via DHCP
+                'advertise_ntp'    => '0', // Offer Lightbox as NTP server via DHCP
+                'advertise_syslog' => '0'  // Offer Lightbox as syslog server via DHCP (option 7)
             ];
             $insert = $this->pdo->prepare("INSERT INTO settings (key, value) VALUES (:key, :value)");
             foreach ($defaultSettings as $key => $value) {
@@ -229,6 +241,13 @@ class Database {
             ':v4a'   => $v4addr, ':v4g'  => $v4gw,
             ':v6a'   => $v6addr, ':v6g'  => $v6gw,
         ]);
+    }
+
+    public function addAlert(string $type, string $source, string $message): void {
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO alerts (type, source, message) VALUES (:type, :source, :message)"
+        );
+        $stmt->execute([':type' => $type, ':source' => $source, ':message' => $message]);
     }
 
     public function updateDhcpSettings($data) {

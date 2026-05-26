@@ -378,8 +378,9 @@ class ConfigGenerator {
         $settings = $this->db->getSettings();
         $dhcpSettings = $this->db->getDhcpSettings();
         $interface = $settings['dhcp_interface'] ?? '';
-        $advertiseDns = ($settings['advertise_dns'] ?? '1') === '1';
-        $advertiseNtp = ($settings['advertise_ntp'] ?? '0') === '1';
+        $advertiseDns    = ($settings['advertise_dns']    ?? '1') === '1';
+        $advertiseNtp    = ($settings['advertise_ntp']    ?? '0') === '1';
+        $advertiseSyslog = ($settings['advertise_syslog'] ?? '0') === '1';
         $hostIPs = $this->getHostIPs();
 
         $content = "# dnsmasq DHCP configuration\n";
@@ -404,6 +405,9 @@ class ConfigGenerator {
             }
             if ($advertiseNtp) {
                 $content .= "dhcp-option=option:ntp-server," . $hostIPs['v4'] . "\n";
+            }
+            if ($advertiseSyslog) {
+                $content .= "dhcp-option=option:log-server," . $hostIPs['v4'] . "\n";
             }
             $content .= "\n";
         }

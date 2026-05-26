@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dns: { title: 'DNS Configuration', desc: 'Manage local name resolution and upstream DNS servers' },
         dhcp: { title: 'DHCP Server', desc: 'Manage IP address assignments and static network reservations' },
         ntp: { title: 'NTP Synchronization', desc: 'Configure system time and network synchronization pools' },
+        syslog: { title: 'Syslog Receiver', desc: 'Centralised syslog collection from network devices via UDP/TCP 514' },
         samba: { title: 'File Sharing', desc: 'Expose storage directories to network clients via SMB' },
         network: { title: 'Network Interfaces', desc: 'Assign IPv4 and IPv6 addresses to host network interfaces' },
         devices: { title: 'Network Devices', desc: 'All DNS-registered devices with live reachability status' },
@@ -40,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tabId === 'dns') loadDNSData();
         if (tabId === 'dhcp') loadDHCPData();
         if (tabId === 'ntp') loadNTPData();
+        if (tabId === 'syslog') loadSyslogData();
         if (tabId === 'samba') loadSambaData();
         if (tabId === 'logs') loadLogsData();
         if (tabId === 'network') loadNetworkData();
@@ -233,7 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(res => res.json())
             .then(data => {
                 if (data.status !== 'success') return;
-                const map = { bind9: data.services.bind9, dhcp: data.services.dhcp, ntp: data.services.ntp, samba: data.services.samba, acn: data.services.acn };
+                const map = { bind9: data.services.bind9, dhcp: data.services.dhcp, ntp: data.services.ntp, samba: data.services.samba, acn: data.services.acn, syslog: data.services.syslog };
                 for (const [svc, running] of Object.entries(map)) {
                     updateServiceBadge('status-' + svc, running);
                     syncServiceToggle(svc, running);
@@ -322,6 +324,127 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
     loadLeases();
+
+    // --- ALERTS (Dashboard) ---
+    const alertsCard   = document.getElementById('alerts-card');
+    const alertsList   = document.getElementById('alerts-list');
+    const alertsBadge  = document.getElementById('alerts-count-badge');
+    const alertsIcon   = document.getElementById('alerts-icon');
+
+    function formatAlertDate(dtStr) {
+        if (!dtStr) return '';
+        const d = new Date(dtStr.replace(' ', 'T') + 'Z');
+        return isNaN(d) ? dtStr : d.toLocaleString();
+    }
+
+    function loadAlertsData() {
+        fetch('/api.php?action=alerts_get')
+            .then(res => res.json())
+            .then(data => {
+                if (data.status !== 'success' || !alertsList) return;
+                const alerts = data.alerts || [];
+
+                // Update badge and card visibility
+                const unacked = alerts.filter(a => !a.acknowledged_at);
+                const hasErrors = unacked.some(a => a.type === 'error');
+
+                if (alerts.length === 0) {
+                    if (alertsCard) alertsCard.style.display = 'none';
+                    return;
+                }
+
+                if (alertsCard) alertsCard.style.display = '';
+                if (alertsBadge) {
+                    alertsBadge.textContent = unacked.length > 0 ? `${unacked.length} active` : 'all acknowledged';
+                    alertsBadge.classList.toggle('has-errors', hasErrors);
+                }
+                if (alertsIcon) alertsIcon.textContent = hasErrors ? '🔴' : '⚠';
+
+                alertsList.innerHTML = '';
+                alerts.forEach(a => {
+                    const isAcked = !!a.acknowledged_at;
+                    const li = document.createElement('li');
+                    li.className = `alert-item ${a.type}${isAcked ? ' acknowledged' : ''}`;
+                    li.dataset.id = a.id;
+
+                    const ackHtml = isAcked
+                        ? `<div class="alert-ack-info">✔ Acknowledged by <strong>${escHtml(a.acknowledged_by || 'unknown')}</strong> at ${formatAlertDate(a.acknowledged_at)}</div>`
+                        : '';
+
+                    const actionsHtml = isAcked
+                        ? `<button class="btn-danger-sm alert-clear-btn" data-id="${a.id}">Clear</button>`
+                        : `<button class="btn-edit-sm alert-ack-btn" data-id="${a.id}">Acknowledge</button>
+                           <button class="btn-danger-sm alert-clear-btn" data-id="${a.id}">Clear</button>`;
+
+                    li.innerHTML = `
+                        <div class="alert-item-body">
+                            <div class="alert-item-top">
+                                <span class="alert-type-badge ${a.type}">${a.type}</span>
+                                <span class="alert-source">${escHtml(a.source)}</span>
+                                <span class="alert-time">${formatAlertDate(a.created_at)}</span>
+                            </div>
+                            <div class="alert-message">${escHtml(a.message)}</div>
+                            ${ackHtml}
+                        </div>
+                        <div class="alert-actions">${actionsHtml}</div>
+                    `;
+                    alertsList.appendChild(li);
+                });
+
+                alertsList.querySelectorAll('.alert-ack-btn').forEach(btn => {
+                    btn.addEventListener('click', () => acknowledgeAlert(btn.dataset.id));
+                });
+                alertsList.querySelectorAll('.alert-clear-btn').forEach(btn => {
+                    btn.addEventListener('click', () => clearAlert(btn.dataset.id));
+                });
+            })
+            .catch(err => console.error('Error fetching alerts:', err));
+    }
+
+    function acknowledgeAlert(id) {
+        const fd = new FormData();
+        fd.append('id', id);
+        fetch('/api.php?action=alert_acknowledge', { method: 'POST', body: fd })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') loadAlertsData();
+                else showToast(data.message, 'error');
+            });
+    }
+
+    function clearAlert(id) {
+        const fd = new FormData();
+        fd.append('id', id);
+        fetch('/api.php?action=alert_clear', { method: 'POST', body: fd })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') loadAlertsData();
+                else showToast(data.message, 'error');
+            });
+    }
+
+    const clearAckedBtn = document.getElementById('clear-acked-alerts-btn');
+    if (clearAckedBtn) {
+        clearAckedBtn.addEventListener('click', () => {
+            fetch('/api.php?action=alerts_clear_acknowledged', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') { showToast(data.message); loadAlertsData(); }
+                    else showToast(data.message, 'error');
+                });
+        });
+    }
+
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    loadAlertsData();
+    setInterval(loadAlertsData, 15000);
 
     // --- TAB: DNS DATA & ACTIONS ---
     const dnsForm = document.getElementById('dns-global-form');
@@ -498,8 +621,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     
                     // Advertisement checkboxes (from global settings, not dhcp_settings)
-                    document.getElementById('advertise_dns').checked = (data.settings.advertise_dns ?? '1') !== '0';
-                    document.getElementById('advertise_ntp').checked = data.settings.advertise_ntp === '1';
+                    document.getElementById('advertise_dns').checked    = (data.settings.advertise_dns    ?? '1') !== '0';
+                    document.getElementById('advertise_ntp').checked    = data.settings.advertise_ntp    === '1';
+                    document.getElementById('advertise_syslog').checked = data.settings.advertise_syslog === '1';
 
                     const settings = data.dhcp_settings;
 
@@ -1050,6 +1174,86 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(() => showToast('Failed to apply configuration: server error.', 'error'));
     });
+
+    // --- TAB: SYSLOG ---
+    const syslogOutput = document.getElementById('syslog-output');
+    const syslogFilter = document.getElementById('syslog-filter-input');
+    const syslogLines  = document.getElementById('syslog-lines-select');
+    const syslogTotal  = document.getElementById('syslog-total-label');
+
+    let _syslogEntries = [];
+
+    function renderSyslogEntries() {
+        if (!syslogOutput) return;
+        const filter = syslogFilter ? syslogFilter.value.trim().toLowerCase() : '';
+        const visible = filter
+            ? _syslogEntries.filter(l => l.toLowerCase().includes(filter))
+            : _syslogEntries;
+        syslogOutput.textContent = visible.length > 0
+            ? visible.join('\n')
+            : '(no messages match filter)';
+        const wrapper = syslogOutput.closest('.console-wrapper');
+        if (wrapper) wrapper.scrollTop = wrapper.scrollHeight;
+    }
+
+    function loadSyslogData() {
+        if (!syslogOutput) return;
+        const lines = syslogLines ? syslogLines.value : 200;
+        syslogOutput.textContent = 'Fetching syslog messages...';
+        fetch(`/api.php?action=syslog_get&lines=${lines}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.status !== 'success') {
+                    syslogOutput.textContent = `Error: ${data.message}`;
+                    return;
+                }
+                _syslogEntries = data.entries || [];
+                if (syslogTotal) {
+                    syslogTotal.textContent = `(${data.total.toLocaleString()} total lines on disk)`;
+                }
+                if (_syslogEntries.length === 0) {
+                    syslogOutput.textContent = '(no syslog messages received yet)';
+                    return;
+                }
+                renderSyslogEntries();
+            })
+            .catch(() => { syslogOutput.textContent = 'Error: Failed to fetch syslog data.'; });
+    }
+
+    if (syslogFilter) syslogFilter.addEventListener('input', renderSyslogEntries);
+    if (syslogLines)  syslogLines.addEventListener('change', loadSyslogData);
+
+    const refreshSyslogBtn = document.getElementById('refresh-syslog-btn');
+    if (refreshSyslogBtn) refreshSyslogBtn.addEventListener('click', loadSyslogData);
+
+    const copySyslogBtn = document.getElementById('copy-syslog-btn');
+    if (copySyslogBtn) {
+        copySyslogBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(syslogOutput.textContent)
+                .then(() => showToast('Syslog copied to clipboard.'))
+                .catch(() => showToast('Failed to copy.', 'error'));
+        });
+    }
+
+    const clearSyslogBtn = document.getElementById('clear-syslog-btn');
+    if (clearSyslogBtn) {
+        clearSyslogBtn.addEventListener('click', () => {
+            if (!confirm('Clear all syslog messages? This cannot be undone.')) return;
+            fetch('/api.php?action=syslog_clear', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        _syslogEntries = [];
+                        syslogOutput.textContent = '(log cleared)';
+                        if (syslogTotal) syslogTotal.textContent = '(0 total lines on disk)';
+                        showToast(data.message);
+                    } else {
+                        showToast(data.message, 'error');
+                    }
+                })
+                .catch(() => showToast('Failed to clear syslog.', 'error'));
+        });
+    }
 
     // --- TAB: USER ACCOUNTS ---
     const userForm = document.getElementById('user-form');

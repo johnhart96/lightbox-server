@@ -70,6 +70,11 @@ $currentUser = Auth::currentUser();
                         </a>
                     </li>
                     <li>
+                        <a href="#syslog" class="nav-link" data-tab="syslog">
+                            <span class="icon">📋</span> Syslog
+                        </a>
+                    </li>
+                    <li>
                         <a href="#samba" class="nav-link" data-tab="samba">
                             <span class="icon">📁</span> File Sharing
                         </a>
@@ -263,7 +268,7 @@ $currentUser = Auth::currentUser();
                                     </div>
                                 </li>
                                 <li>
-                                    <span class="service-name">File Sharing (smbd)</span>
+                                    <span class="service-name">File Sharing (smbd &amp; tftpd)</span>
                                     <div class="service-controls">
                                         <span class="badge" id="status-samba">Checking...</span>
                                         <label class="switch" title="Enable / disable File Sharing">
@@ -282,8 +287,31 @@ $currentUser = Auth::currentUser();
                                         </label>
                                     </div>
                                 </li>
+                                <li>
+                                    <span class="service-name">Syslog Server (syslog-ng)</span>
+                                    <div class="service-controls">
+                                        <span class="badge" id="status-syslog">Checking...</span>
+                                        <label class="switch" title="Enable / disable Syslog Server">
+                                            <input type="checkbox" id="toggle-syslog" data-service="syslog" disabled>
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                </li>
                             </ul>
                         </div>
+                    </div>
+
+                    <!-- Alerts Card (hidden when empty) -->
+                    <div class="card alerts-card" id="alerts-card" style="display:none;">
+                        <div class="alerts-header">
+                            <h3>
+                                <span class="alerts-icon" id="alerts-icon">⚠</span>
+                                Warnings &amp; Errors
+                                <span class="badge" id="alerts-count-badge">0</span>
+                            </h3>
+                            <button id="clear-acked-alerts-btn" class="btn btn-outline btn-sm">Clear Acknowledged</button>
+                        </div>
+                        <ul class="alerts-list" id="alerts-list"></ul>
                     </div>
 
                     <!-- DHCP Leases Table -->
@@ -424,8 +452,12 @@ $currentUser = Auth::currentUser();
                                             <input type="checkbox" id="advertise_ntp" name="advertise_ntp" value="1">
                                             Offer Lightbox as NTP server
                                         </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="advertise_syslog" name="advertise_syslog" value="1">
+                                            Offer Lightbox as Syslog server
+                                        </label>
                                     </div>
-                                    <span class="help-text">Advertise this server's IP to DHCP clients for DNS and/or NTP.</span>
+                                    <span class="help-text">Advertise this server's IP to DHCP clients for DNS, NTP, and/or Syslog (option 7).</span>
                                 </div>
 
                                 <hr>
@@ -559,6 +591,43 @@ $currentUser = Auth::currentUser();
                     </div>
                 </section>
 
+                <!-- Tab: Syslog -->
+                <section id="tab-syslog" class="tab-panel">
+                    <div class="settings-grid">
+                        <div class="card form-card max-w-600">
+                            <h3>Syslog Receiver Settings</h3>
+                            <p class="desc-text">Accepts syslog messages from network devices via UDP and TCP on port 514. Messages are written to <code>/data/syslog/messages.log</code> on the host.</p>
+                            <div class="info-alert">
+                                <strong>Configure devices</strong> to send syslog to this server's IP address on port 514 (UDP or TCP). Enable <strong>Offer Lightbox as Syslog server</strong> in the DHCP settings to advertise this automatically via DHCP option 7.
+                            </div>
+                        </div>
+
+                        <div class="card logs-card" style="grid-column: 1 / -1;">
+                            <div class="logs-header">
+                                <div class="form-group inline-group" style="align-items:center;gap:12px;">
+                                    <label for="syslog-lines-select">Show last:</label>
+                                    <select id="syslog-lines-select">
+                                        <option value="100">100 lines</option>
+                                        <option value="200" selected>200 lines</option>
+                                        <option value="500">500 lines</option>
+                                        <option value="1000">1000 lines</option>
+                                    </select>
+                                    <span id="syslog-total-label" class="text-muted" style="font-size:0.85rem;"></span>
+                                </div>
+                                <div class="logs-actions">
+                                    <input type="text" id="syslog-filter-input" placeholder="Filter messages..." style="padding:6px 10px;background:var(--color-input-bg);border:1px solid var(--color-border);border-radius:6px;color:var(--color-text);font-size:0.85rem;width:200px;">
+                                    <button id="copy-syslog-btn" class="btn btn-outline btn-sm">Copy</button>
+                                    <button id="refresh-syslog-btn" class="btn btn-secondary btn-sm">Refresh</button>
+                                    <button id="clear-syslog-btn" class="btn btn-outline btn-sm" style="color:var(--color-red);">Clear Log</button>
+                                </div>
+                            </div>
+                            <div class="console-wrapper">
+                                <pre id="syslog-output">Loading syslog messages...</pre>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Tab: Samba -->
                 <section id="tab-samba" class="tab-panel">
                     <div class="card table-card">
@@ -644,6 +713,7 @@ $currentUser = Auth::currentUser();
                                     <option value="ntp">NTP Service (lightbox-ntp)</option>
                                     <option value="samba">File Service (lightbox-samba)</option>
                                     <option value="acn">ACN Discovery (lightbox-acn)</option>
+                                    <option value="syslog">Syslog Server (lightbox-syslog)</option>
                                 </select>
                             </div>
                             <div class="logs-actions">

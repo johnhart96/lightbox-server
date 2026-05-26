@@ -355,6 +355,10 @@ class SystemManager {
                 $ok = $this->restartContainer('lightbox-ntp');
                 return ['ok' => $ok, 'output' => $ok ? '' : 'docker restart returned unexpected output'];
 
+            case 'syslog':
+                $ok = $this->restartContainer('lightbox-syslog');
+                return ['ok' => $ok, 'output' => $ok ? '' : 'docker restart returned unexpected output'];
+
             default:
                 return ['ok' => false, 'output' => 'unknown service'];
         }
@@ -371,7 +375,8 @@ class SystemManager {
             case 'dhcp': $containerName = 'lightbox-dhcp'; break;
             case 'ntp': $containerName = 'lightbox-ntp'; break;
             case 'samba': $containerName = 'lightbox-samba'; break;
-            case 'acn':   $containerName = 'lightbox-acn';   break;
+            case 'acn':    $containerName = 'lightbox-acn';    break;
+            case 'syslog': $containerName = 'lightbox-syslog'; break;
             default: return 'Invalid service';
         }
 

@@ -52,11 +52,12 @@ try {
             echo json_encode([
                 'status' => 'success',
                 'services' => [
-                    'bind9' => in_array('lightbox-bind9', $running, true),
-                    'dhcp'  => in_array('lightbox-dhcp',  $running, true),
-                    'ntp'   => in_array('lightbox-ntp',   $running, true),
-                    'samba' => in_array('lightbox-samba', $running, true),
-                    'acn'   => in_array('lightbox-acn',   $running, true)
+                    'bind9'  => in_array('lightbox-bind9',   $running, true),
+                    'dhcp'   => in_array('lightbox-dhcp',    $running, true),
+                    'ntp'    => in_array('lightbox-ntp',     $running, true),
+                    'samba'  => in_array('lightbox-samba',   $running, true),
+                    'acn'    => in_array('lightbox-acn',     $running, true),
+                    'syslog' => in_array('lightbox-syslog',  $running, true),
                 ]
             ]);
             break;
@@ -75,11 +76,12 @@ try {
                 'status' => 'success',
                 'metrics' => $metrics,
                 'services' => [
-                    'bind9' => in_array('lightbox-bind9', $running, true),
-                    'dhcp'  => in_array('lightbox-dhcp',  $running, true),
-                    'ntp'   => in_array('lightbox-ntp',   $running, true),
-                    'samba' => in_array('lightbox-samba', $running, true),
-                    'acn'   => in_array('lightbox-acn',   $running, true)
+                    'bind9'  => in_array('lightbox-bind9',  $running, true),
+                    'dhcp'   => in_array('lightbox-dhcp',   $running, true),
+                    'ntp'    => in_array('lightbox-ntp',    $running, true),
+                    'samba'  => in_array('lightbox-samba',  $running, true),
+                    'acn'    => in_array('lightbox-acn',    $running, true),
+                    'syslog' => in_array('lightbox-syslog', $running, true),
                 ],
                 'stats' => [
                     'dns_count' => $dnsCount,
@@ -215,9 +217,10 @@ try {
 
         case 'dhcp_save':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
-            $db->updateSetting('dhcp_interface', $_POST['dhcp_interface'] ?? '');
-            $db->updateSetting('advertise_dns', isset($_POST['advertise_dns']) ? '1' : '0');
-            $db->updateSetting('advertise_ntp', isset($_POST['advertise_ntp']) ? '1' : '0');
+            $db->updateSetting('dhcp_interface',   $_POST['dhcp_interface'] ?? '');
+            $db->updateSetting('advertise_dns',    isset($_POST['advertise_dns'])    ? '1' : '0');
+            $db->updateSetting('advertise_ntp',    isset($_POST['advertise_ntp'])    ? '1' : '0');
+            $db->updateSetting('advertise_syslog', isset($_POST['advertise_syslog']) ? '1' : '0');
             
             $data = [
                 ':v4_enabled' => isset($_POST['v4_enabled']) ? 1 : 0,
@@ -526,10 +529,11 @@ try {
             $errors = [];
 
             $services = [
-                'lightbox-bind9' => 'bind9',
-                'lightbox-dhcp'  => 'dhcp',
-                'lightbox-ntp'   => 'ntp',
-                'lightbox-samba' => 'samba',
+                'lightbox-bind9'   => 'bind9',
+                'lightbox-dhcp'    => 'dhcp',
+                'lightbox-ntp'     => 'ntp',
+                'lightbox-samba'   => 'samba',
+                'lightbox-syslog'  => 'syslog',
             ];
 
             foreach ($services as $container => $svc) {
@@ -550,13 +554,15 @@ try {
             if ($success) {
                 echo json_encode(['status' => 'success', 'message' => 'Configurations written and all services reloaded.']);
             } else {
+                $errMsg = 'Service reload failed after applying changes: ' . implode('; ', $errors);
+                $db->addAlert('error', 'apply_changes', $errMsg);
                 echo json_encode(['status' => 'warning', 'message' => 'Configs written, but some services failed: ' . implode('; ', $errors)]);
             }
             break;
 
         case 'service_toggle':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
-            $allowed = ['bind9' => 'lightbox-bind9', 'dhcp' => 'lightbox-dhcp', 'ntp' => 'lightbox-ntp', 'samba' => 'lightbox-samba', 'acn' => 'lightbox-acn'];
+            $allowed = ['bind9' => 'lightbox-bind9', 'dhcp' => 'lightbox-dhcp', 'ntp' => 'lightbox-ntp', 'samba' => 'lightbox-samba', 'acn' => 'lightbox-acn', 'syslog' => 'lightbox-syslog'];
             $service = $_POST['service'] ?? '';
             $state   = $_POST['state']   ?? '';
 
@@ -570,7 +576,10 @@ try {
                 $ok = $system->stopContainer($container);
             }
 
-            if (!$ok) throw new Exception("Failed to $state $service.");
+            if (!$ok) {
+                $db->addAlert('error', 'service_toggle', "Failed to $state service '$service'.");
+                throw new Exception("Failed to $state $service.");
+            }
             echo json_encode(['status' => 'success', 'message' => ucfirst($state) . 'ed ' . $service . '.']);
             break;
 
@@ -581,6 +590,67 @@ try {
                 'status' => 'success',
                 'logs' => $logs
             ]);
+            break;
+
+        case 'syslog_get':
+            $logFile = '/data/syslog/messages.log';
+            $lines   = max(1, min(2000, (int)($_GET['lines'] ?? 200)));
+            $entries = [];
+            if (file_exists($logFile)) {
+                $all = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                $entries = array_slice($all, -$lines);
+            }
+            echo json_encode([
+                'status'  => 'success',
+                'entries' => $entries,
+                'total'   => file_exists($logFile) ? count(file($logFile) ?: []) : 0,
+            ]);
+            break;
+
+        case 'syslog_clear':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $logFile = '/data/syslog/messages.log';
+            if (file_exists($logFile)) {
+                file_put_contents($logFile, '');
+            }
+            echo json_encode(['status' => 'success', 'message' => 'Syslog cleared.']);
+            break;
+
+        case 'alerts_get':
+            $pdo = $db->getConnection();
+            $rows = $pdo->query(
+                "SELECT * FROM alerts ORDER BY acknowledged_at IS NOT NULL ASC, created_at DESC"
+            )->fetchAll();
+            echo json_encode(['status' => 'success', 'alerts' => $rows]);
+            break;
+
+        case 'alert_acknowledge':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $id   = (int)($_POST['id'] ?? 0);
+            if (!$id) throw new Exception('Alert ID required.');
+            $user = Auth::currentUser();
+            $by   = $user ? ($user['display_name'] ?: $user['username']) : 'System';
+            $pdo  = $db->getConnection();
+            $stmt = $pdo->prepare(
+                "UPDATE alerts SET acknowledged_at = CURRENT_TIMESTAMP, acknowledged_by = :by WHERE id = :id"
+            );
+            $stmt->execute([':by' => $by, ':id' => $id]);
+            echo json_encode(['status' => 'success', 'message' => 'Alert acknowledged.']);
+            break;
+
+        case 'alert_clear':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $id  = (int)($_POST['id'] ?? 0);
+            if (!$id) throw new Exception('Alert ID required.');
+            $pdo = $db->getConnection();
+            $pdo->prepare("DELETE FROM alerts WHERE id = :id")->execute([':id' => $id]);
+            echo json_encode(['status' => 'success', 'message' => 'Alert cleared.']);
+            break;
+
+        case 'alerts_clear_acknowledged':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') throw new Exception('Invalid method');
+            $db->getConnection()->exec("DELETE FROM alerts WHERE acknowledged_at IS NOT NULL");
+            echo json_encode(['status' => 'success', 'message' => 'Acknowledged alerts cleared.']);
             break;
 
         case 'logout':
