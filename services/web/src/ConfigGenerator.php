@@ -18,6 +18,23 @@ class ConfigGenerator {
         $this->db = $db;
     }
 
+    private function writeFile(string $path, string $content): void {
+        if (is_dir($path)) {
+            throw new \RuntimeException(
+                "Cannot write \"$path\": path is a directory.\n" .
+                "This is caused by Docker creating a directory in place of a file-level bind mount.\n" .
+                "Fix: rm -rf " . escapeshellarg($path) . " && docker compose up"
+            );
+        }
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            mkdir($dir, 0777, true);
+        }
+        if (file_put_contents($path, $content) === false) {
+            throw new \RuntimeException("Failed to write config file: $path");
+        }
+    }
+
     /**
      * Get the host IP(s) to use in DNS zone files and DHCP advertisements.
      * Reads from the dhcp container (network_mode: host) so we see real host
@@ -166,7 +183,7 @@ class ConfigGenerator {
         $optionsContent .= "    recursion yes;\n";
         $optionsContent .= "};\n";
 
-        file_put_contents($this->bindOptionsPath, $optionsContent);
+        $this->writeFile($this->bindOptionsPath, $optionsContent);
 
         // 2. Write named.conf.local
         $localContent = "// Local zones configuration\n";
@@ -176,7 +193,7 @@ class ConfigGenerator {
         $localContent .= "    file \"/etc/bind/zones/db." . $domain . "\";\n";
         $localContent .= "};\n";
 
-        file_put_contents($this->bindLocalPath, $localContent);
+        $this->writeFile($this->bindLocalPath, $localContent);
 
         // 3. Write zone file db.<domain>
         if (!file_exists($this->bindZonesDir)) {
