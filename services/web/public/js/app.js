@@ -450,6 +450,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const dnsForm = document.getElementById('dns-global-form');
     const dnsRecordForm = document.getElementById('dns-record-form');
 
+    function expandIPv6(ip) {
+        const halves = ip.split('::');
+        const left  = halves[0] ? halves[0].split(':') : [];
+        const right = halves.length > 1 && halves[1] ? halves[1].split(':') : [];
+        const full  = [...left, ...Array(8 - left.length - right.length).fill('0'), ...right];
+        return full.map(g => g.padStart(4, '0')).join('');
+    }
+
+    function reverseInfo(ip, type) {
+        if (type === 'A') {
+            const p = ip.split('.');
+            return { zone: `${p[2]}.${p[1]}.${p[0]}.in-addr.arpa`, ptr: p[3] };
+        }
+        const hex  = expandIPv6(ip);
+        const zone = hex.slice(0, 16).split('').reverse().join('.') + '.ip6.arpa';
+        const ptr  = hex.slice(16).split('').reverse().join('.');
+        return { zone, ptr };
+    }
+
     function loadDNSData() {
         fetch('/api.php?action=dns_get')
             .then(res => res.json())
@@ -538,6 +557,38 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     } else {
                         dhcpTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No DHCP reservations or active leases with hostnames found.</td></tr>';
+                    }
+
+                    // Populate DNS Zone Entries table (forward + reverse combined)
+                    const allEntries = [
+                        ...(data.records || []).map(r => ({
+                            hostname: r.hostname, ip: r.ip_address, type: r.ip_type, source: 'custom'
+                        })),
+                        ...(data.dhcp_dns_entries || []).map(e => ({
+                            hostname: e.hostname, ip: e.ip, type: e.type, source: e.source
+                        }))
+                    ];
+                    const zoneTbody = document.querySelector('#dns-zone-table tbody');
+                    if (allEntries.length > 0) {
+                        const sourceBadge = {
+                            custom:      '<span class="badge active">Custom</span>',
+                            reservation: '<span class="badge active">Reservation</span>',
+                            dynamic:     '<span class="badge pending">Dynamic</span>',
+                        };
+                        zoneTbody.innerHTML = allEntries.map(e => {
+                            const rev = reverseInfo(e.ip, e.type);
+                            const badge = sourceBadge[e.source] || `<span class="badge">${e.source}</span>`;
+                            return `<tr>
+                                <td><strong>${e.hostname}</strong>.${data.settings.domain_name}</td>
+                                <td><code>${e.ip}</code></td>
+                                <td><span class="badge ${e.type === 'A' ? 'active' : 'pending'}">${e.type}</span></td>
+                                <td>${badge}</td>
+                                <td class="text-muted"><code>${rev.zone}</code></td>
+                                <td><code>${rev.ptr}</code></td>
+                            </tr>`;
+                        }).join('');
+                    } else {
+                        zoneTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No DNS entries found.</td></tr>';
                     }
                 }
             });

@@ -84,6 +84,122 @@ class ConfigGenerator {
         return $ips;
     }
 
+    private function expandIPv6(string $ip): ?string {
+        $bin = @inet_pton($ip);
+        if ($bin === false) return null;
+        return implode(':', str_split(bin2hex($bin), 4));
+    }
+
+    private function ipv4ReverseZone(string $ip): ?string {
+        $parts = explode('.', $ip);
+        if (count($parts) !== 4) return null;
+        return $parts[2] . '.' . $parts[1] . '.' . $parts[0] . '.in-addr.arpa';
+    }
+
+    private function ipv4PtrLabel(string $ip): string {
+        return explode('.', $ip)[3];
+    }
+
+    private function ipv6ReverseZone(string $ip): ?string {
+        $expanded = $this->expandIPv6($ip);
+        if ($expanded === null) return null;
+        $hex = str_replace(':', '', $expanded);
+        return implode('.', array_reverse(str_split(substr($hex, 0, 16)))) . '.ip6.arpa';
+    }
+
+    private function ipv6PtrLabel(string $ip): string {
+        $expanded = $this->expandIPv6($ip);
+        if ($expanded === null) return '';
+        $hex = str_replace(':', '', $expanded);
+        return implode('.', array_reverse(str_split(substr($hex, 16))));
+    }
+
+    /**
+     * Build reverse zone map: zoneName => [['ptr' => label, 'fqdn' => 'host.domain.'], ...]
+     * Deduplicates by IP address (first record wins).
+     */
+    private function buildPtrMap(array $records, string $domain): array {
+        $zones = [];
+        $seen  = [];
+        foreach ($records as $r) {
+            $ip = $r['ip'];
+            if (isset($seen[$ip])) continue;
+            if ($r['type'] === 'A') {
+                $zone  = $this->ipv4ReverseZone($ip);
+                $label = $this->ipv4PtrLabel($ip);
+            } elseif ($r['type'] === 'AAAA') {
+                $zone  = $this->ipv6ReverseZone($ip);
+                $label = $this->ipv6PtrLabel($ip);
+            } else {
+                continue;
+            }
+            if ($zone === null || $label === '') continue;
+            $seen[$ip] = true;
+            $zones[$zone][] = ['ptr' => $label, 'fqdn' => $r['hostname'] . '.' . $domain . '.'];
+        }
+        return $zones;
+    }
+
+    private function buildReverseZoneContent(string $zoneName, string $domain, int $serial, array $staticPtrs, array $dynamicPtrs): string {
+        $content  = "\$TTL    604800\n";
+        $content .= "@       IN      SOA     ns1." . $domain . ". admin." . $domain . ". (\n";
+        $content .= "                              " . $serial . "         ; Serial\n";
+        $content .= "                          604800         ; Refresh\n";
+        $content .= "                           86400         ; Retry\n";
+        $content .= "                         2419200         ; Expire\n";
+        $content .= "                          604800 )       ; Negative Cache TTL\n";
+        $content .= ";\n";
+        $content .= "@       IN      NS      ns1." . $domain . ".\n";
+        if (!empty($staticPtrs)) {
+            $content .= "\n; Static records\n";
+            foreach ($staticPtrs as $ptr) {
+                $content .= sprintf("%-39s IN      PTR     %s\n", $ptr['ptr'], $ptr['fqdn']);
+            }
+        }
+        if (!empty($dynamicPtrs)) {
+            $content .= "\n; Dynamic DHCP Leases\n";
+            foreach ($dynamicPtrs as $ptr) {
+                $content .= sprintf("%-39s IN      PTR     %s\n", $ptr['ptr'], $ptr['fqdn']);
+            }
+        }
+        return $content;
+    }
+
+    /**
+     * Write reverse zone files for all IP records. Removes stale reverse zone files.
+     * Returns the list of active reverse zone names (for named.conf.local declarations).
+     */
+    private function writeReverseZones(string $domain, int $serial, array $staticRecords, array $dynamicRecords): array {
+        $staticPtrMap  = $this->buildPtrMap($staticRecords, $domain);
+        $dynamicPtrMap = $this->buildPtrMap($dynamicRecords, $domain);
+        $activeZones   = array_values(array_unique(array_merge(array_keys($staticPtrMap), array_keys($dynamicPtrMap))));
+
+        if (!file_exists($this->bindZonesDir)) {
+            mkdir($this->bindZonesDir, 0777, true);
+        }
+
+        foreach ($activeZones as $zoneName) {
+            $content = $this->buildReverseZoneContent(
+                $zoneName, $domain, $serial,
+                $staticPtrMap[$zoneName]  ?? [],
+                $dynamicPtrMap[$zoneName] ?? []
+            );
+            file_put_contents($this->bindZonesDir . '/db.' . $zoneName, $content);
+        }
+
+        // Remove stale reverse zone files from a previous configuration
+        foreach (['*.in-addr.arpa', '*.ip6.arpa'] as $pattern) {
+            foreach (glob($this->bindZonesDir . '/db.' . $pattern) ?: [] as $file) {
+                $name = substr(basename($file), 3); // strip 'db.'
+                if (!in_array($name, $activeZones, true)) {
+                    unlink($file);
+                }
+            }
+        }
+
+        return $activeZones;
+    }
+
     public function generateAll() {
         $this->generateBindConfig();
         $this->generateDnsmasqConfig();
@@ -185,23 +301,21 @@ class ConfigGenerator {
 
         $this->writeFile($this->bindOptionsPath, $optionsContent);
 
-        // 2. Write named.conf.local
-        $localContent = "// Local zones configuration\n";
-        $localContent .= "// Generated by Web Admin. DO NOT EDIT.\n\n";
-        $localContent .= "zone \"" . $domain . "\" {\n";
-        $localContent .= "    type master;\n";
-        $localContent .= "    file \"/etc/bind/zones/db." . $domain . "\";\n";
-        $localContent .= "};\n";
-
-        $this->writeFile($this->bindLocalPath, $localContent);
-
-        // 3. Write zone file db.<domain>
+        // 2. Write zone file db.<domain> and collect records for reverse zones
         if (!file_exists($this->bindZonesDir)) {
             mkdir($this->bindZonesDir, 0777, true);
         }
 
         $hostIPs = $this->getHostIPs();
-        $serial = time();
+        $serial  = time();
+
+        // Collect static IP→hostname records for PTR generation
+        $staticRecords = [
+            ['hostname' => 'ns1', 'ip' => $hostIPs['v4'], 'type' => 'A'],
+        ];
+        if ($hostIPs['v6'] !== '::1') {
+            $staticRecords[] = ['hostname' => 'ns1', 'ip' => $hostIPs['v6'], 'type' => 'AAAA'];
+        }
 
         $zoneContent = "\$TTL    604800\n";
         $zoneContent .= "@       IN      SOA     ns1." . $domain . ". admin." . $domain . ". (\n";
@@ -223,6 +337,7 @@ class ConfigGenerator {
         $stmt = $pdo->query("SELECT hostname, ip_address, ip_type FROM dns_records");
         while ($row = $stmt->fetch()) {
             $zoneContent .= sprintf("%-15s IN      %-5s %s\n", $row['hostname'], $row['ip_type'], $row['ip_address']);
+            $staticRecords[] = ['hostname' => $row['hostname'], 'ip' => $row['ip_address'], 'type' => $row['ip_type']];
         }
 
         // Query DHCP reservations to automatically add DNS records for convenience
@@ -234,6 +349,7 @@ class ConfigGenerator {
                 $type = ($row['ip_type'] === 'IPv6') ? 'AAAA' : 'A';
                 $zoneContent .= sprintf("%-15s IN      %-5s %s\n", $row['hostname'], $type, $row['ip_address']);
                 $staticHostnames[strtolower($row['hostname'])] = true;
+                $staticRecords[] = ['hostname' => $row['hostname'], 'ip' => $row['ip_address'], 'type' => $type];
             }
         }
 
@@ -245,15 +361,35 @@ class ConfigGenerator {
 
         // Dynamic leases from dnsmasq lease file — add, update, remove automatically
         $dynamicLeases = $this->parseDynamicLeases($staticHostnames);
+        $dynamicRecords = [];
         if (!empty($dynamicLeases)) {
             $zoneContent .= "\n; Dynamic DHCP Leases\n";
             foreach ($dynamicLeases as $lease) {
                 $zoneContent .= sprintf("%-15s IN      %-5s %s\n", $lease['hostname'], $lease['type'], $lease['ip']);
                 $staticHostnames[strtolower($lease['hostname'])] = true;
+                $dynamicRecords[] = ['hostname' => $lease['hostname'], 'ip' => $lease['ip'], 'type' => $lease['type']];
             }
         }
 
         file_put_contents($this->bindZonesDir . '/db.' . $domain, $zoneContent);
+
+        // 3. Generate reverse zone files (one per /24 for IPv4, one per /64 for IPv6)
+        $reverseZoneNames = $this->writeReverseZones($domain, $serial, $staticRecords, $dynamicRecords);
+
+        // 4. Write named.conf.local with forward zone + all reverse zones
+        $localContent  = "// Local zones configuration\n";
+        $localContent .= "// Generated by Web Admin. DO NOT EDIT.\n\n";
+        $localContent .= "zone \"" . $domain . "\" {\n";
+        $localContent .= "    type master;\n";
+        $localContent .= "    file \"/etc/bind/zones/db." . $domain . "\";\n";
+        $localContent .= "};\n";
+        foreach ($reverseZoneNames as $zoneName) {
+            $localContent .= "\nzone \"" . $zoneName . "\" {\n";
+            $localContent .= "    type master;\n";
+            $localContent .= "    file \"/etc/bind/zones/db." . $zoneName . "\";\n";
+            $localContent .= "};\n";
+        }
+        $this->writeFile($this->bindLocalPath, $localContent);
     }
 
     /**
@@ -275,16 +411,14 @@ class ConfigGenerator {
             $skipHostnames[strtolower($row['hostname'])] = true;
         }
 
+        // Update forward zone — replace the auto-managed dynamic section
         $content = file_get_contents($zoneFile);
-
-        // Strip the auto-managed section and everything after it
-        $marker = "\n; Dynamic DHCP Leases\n";
-        $cutPos = strpos($content, $marker);
+        $marker  = "\n; Dynamic DHCP Leases\n";
+        $cutPos  = strpos($content, $marker);
         if ($cutPos !== false) {
             $content = substr($content, 0, $cutPos);
         }
 
-        // Append DHCP dynamic section
         $dynamicLeases = $this->parseDynamicLeases($skipHostnames);
         if (!empty($dynamicLeases)) {
             $content .= "\n; Dynamic DHCP Leases\n";
@@ -294,6 +428,50 @@ class ConfigGenerator {
         }
 
         file_put_contents($zoneFile, $content);
+
+        // Rebuild reverse zones without docker exec — read ns1 IP from the forward zone file
+        $staticRecords = [];
+        if (preg_match('/^ns1\s+IN\s+A\s+([\d.]+)/m', $content, $m)) {
+            $staticRecords[] = ['hostname' => 'ns1', 'ip' => $m[1], 'type' => 'A'];
+        }
+        if (preg_match('/^ns1\s+IN\s+AAAA\s+([0-9a-fA-F:]+)/m', $content, $m)) {
+            $staticRecords[] = ['hostname' => 'ns1', 'ip' => $m[1], 'type' => 'AAAA'];
+        }
+
+        $stmt = $pdo->query("SELECT hostname, ip_address, ip_type FROM dns_records");
+        while ($row = $stmt->fetch()) {
+            $staticRecords[] = ['hostname' => $row['hostname'], 'ip' => $row['ip_address'], 'type' => $row['ip_type']];
+        }
+
+        $stmt = $pdo->query("SELECT hostname, ip_address, ip_type FROM dhcp_reservations");
+        while ($row = $stmt->fetch()) {
+            $type = ($row['ip_type'] === 'IPv6') ? 'AAAA' : 'A';
+            $staticRecords[] = ['hostname' => $row['hostname'], 'ip' => $row['ip_address'], 'type' => $type];
+        }
+
+        $dynamicRecords = array_map(
+            fn($l) => ['hostname' => $l['hostname'], 'ip' => $l['ip'], 'type' => $l['type']],
+            $dynamicLeases
+        );
+
+        $serial           = time();
+        $reverseZoneNames = $this->writeReverseZones($domain, $serial, $staticRecords, $dynamicRecords);
+
+        // Update named.conf.local to reflect the current reverse zone set
+        $localContent  = "// Local zones configuration\n";
+        $localContent .= "// Generated by Web Admin. DO NOT EDIT.\n\n";
+        $localContent .= "zone \"" . $domain . "\" {\n";
+        $localContent .= "    type master;\n";
+        $localContent .= "    file \"/etc/bind/zones/db." . $domain . "\";\n";
+        $localContent .= "};\n";
+        foreach ($reverseZoneNames as $zoneName) {
+            $localContent .= "\nzone \"" . $zoneName . "\" {\n";
+            $localContent .= "    type master;\n";
+            $localContent .= "    file \"/etc/bind/zones/db." . $zoneName . "\";\n";
+            $localContent .= "};\n";
+        }
+        $this->writeFile($this->bindLocalPath, $localContent);
+
         return true;
     }
 

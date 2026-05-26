@@ -414,6 +414,28 @@ $currentUser = Auth::currentUser();
                             </div>
                         </div>
                     </div>
+
+                    <div class="card">
+                        <h3>DNS Zone Entries</h3>
+                        <p class="desc-text">All forward (A/AAAA) and reverse (PTR) records currently in the DNS zone.</p>
+                        <div class="table-wrapper">
+                            <table id="dns-zone-table">
+                                <thead>
+                                    <tr>
+                                        <th>FQDN</th>
+                                        <th>IP Address</th>
+                                        <th>Type</th>
+                                        <th>Source</th>
+                                        <th>Reverse Zone</th>
+                                        <th>PTR Label</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="6" class="text-center">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Tab: DHCP -->
